@@ -290,7 +290,7 @@ canvas {
     <button id="btnMedkit" class="touchBtn" data-action="medkit">V</button>
     <button id="btnDecoy" class="touchBtn" data-action="decoy">B</button>
   </div>
-  <div id="touchHint">左:移動 / 右画面ドラッグ:照準 / FIRE:射撃</div>
+  <div id="touchHint">左:移動 / 右画面ドラッグ:照準 / 敵タップ:攻撃 / FIRE:連射</div>
 </div>
 
 <div id="rotateNotice" aria-hidden="true">
@@ -1125,6 +1125,41 @@ function updateAimFromClient(clientX, clientY) {
   mouse.x = Math.max(0, Math.min(canvas.width, p.x));
   mouse.y = Math.max(0, Math.min(canvas.height, p.y));
 }
+
+// スマホ操作：敵を直接タップしたとき、その敵へ照準を合わせて1回攻撃する。
+// 画面右のHUDではなくゲーム画面内（GW×GH）だけを対象にする。
+function tappedZombieFromClient(clientX, clientY) {
+  const p = canvasPointFromClient(clientX, clientY);
+  if (p.x < 0 || p.x > GW || p.y < 0 || p.y > GH) return null;
+  if (typeof zombies === 'undefined' || !Array.isArray(zombies)) return null;
+
+  let best = null;
+  let bestD = Infinity;
+  for (const z of zombies) {
+    if (!z || z.dead) continue;
+    const zx = wx(z.x), zy = wy(z.y);
+    if (zx < -40 || zx > GW + 40 || zy < -40 || zy > GH + 40) continue;
+
+    // 指で狙いやすいよう、実際の半径より少し広めに判定する。
+    const tapR = Math.max(28, (z.radius || 14) + 18);
+    const dx = p.x - zx, dy = p.y - zy;
+    const d = dx * dx + dy * dy;
+    if (d <= tapR * tapR && d < bestD) {
+      best = z;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+function attackTappedZombie(z) {
+  if (!z || z.dead) return false;
+  mouse.x = Math.max(0, Math.min(GW, wx(z.x)));
+  mouse.y = Math.max(0, Math.min(GH, wy(z.y)));
+  player.angle = Math.atan2(mouse.y - wy(player.y), mouse.x - wx(player.x));
+  shootPressed();
+  return true;
+}
 function resetStick() {
   mobile.moveId = null;
   mobile.moveX = 0; mobile.moveY = 0;
@@ -1171,6 +1206,17 @@ canvas.addEventListener('touchstart', e => {
     canvas.onclick({ clientX: t.clientX, clientY: t.clientY });
     return;
   }
+
+  // プレイ中に敵を直接タップした場合は、その敵を狙って1回攻撃する。
+  if (gameState === 'playing') {
+    const z = tappedZombieFromClient(t.clientX, t.clientY);
+    if (z) {
+      mobile.aimId = t.identifier;
+      attackTappedZombie(z);
+      return;
+    }
+  }
+
   mobile.aimId = t.identifier;
 }, { passive: false });
 canvas.addEventListener('touchmove', e => {
