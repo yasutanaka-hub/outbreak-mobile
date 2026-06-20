@@ -172,21 +172,23 @@ canvas {
   box-shadow: 0 0 12px rgba(80,220,220,0.25);
 }
 #actionButtons {
-  right: max(10px, env(safe-area-inset-right));
+  right: max(14px, env(safe-area-inset-right));
   bottom: max(14px, env(safe-area-inset-bottom));
-  display: grid; grid-template-columns: repeat(3, 58px); grid-auto-rows: 48px;
-  gap: 8px; pointer-events: none;
+  display: grid; grid-template-columns: repeat(3, 46px); grid-auto-rows: 38px;
+  gap: 6px; pointer-events: none;
+  transition: right 0.15s ease, opacity 0.15s ease;
 }
 .touchBtn {
   pointer-events: auto;
-  background: rgba(28,8,8,0.65); color: #fdd;
-  border: 1px solid rgba(220,50,50,0.65); border-radius: 10px;
-  font: bold 12px 'Courier New', monospace; letter-spacing: 1px;
-  box-shadow: inset 0 0 10px rgba(220,0,0,0.10), 0 0 12px rgba(0,0,0,0.45);
+  background: rgba(28,8,8,0.42); color: rgba(255,230,230,0.72);
+  border: 1px solid rgba(220,50,50,0.42); border-radius: 9px;
+  font: bold 10px 'Courier New', monospace; letter-spacing: 1px;
+  box-shadow: inset 0 0 8px rgba(220,0,0,0.08), 0 0 10px rgba(0,0,0,0.35);
   touch-action: none;
+  opacity: 0.72;
 }
-.touchBtn:active, .touchBtn.down { background: rgba(150,0,0,0.82); color: #fff; }
-#btnFire { grid-column: 2 / span 2; grid-row: 1 / span 2; width: 124px; height: 104px; border-radius: 18px; font-size: 15px; }
+.touchBtn:active, .touchBtn.down { background: rgba(150,0,0,0.82); color: #fff; opacity: 0.95; }
+#btnFire { grid-column: 2 / span 2; grid-row: 1 / span 2; width: 98px; height: 82px; border-radius: 14px; font-size: 12px; }
 #btnDash { grid-column: 1; grid-row: 1; }
 #btnInteract { grid-column: 1; grid-row: 2; }
 #btnReload { grid-column: 1; grid-row: 3; }
@@ -215,9 +217,9 @@ canvas {
   #stickZone { width: 128px; height: 128px; }
   #stickBase { width: 104px; height: 104px; }
   #stickKnob { width: 46px; height: 46px; }
-  #actionButtons { grid-template-columns: repeat(3, 50px); grid-auto-rows: 42px; gap: 7px; }
-  #btnFire { width: 107px; height: 91px; font-size: 13px; }
-  .touchBtn { font-size: 10px; border-radius: 9px; }
+  #actionButtons { grid-template-columns: repeat(3, 42px); grid-auto-rows: 34px; gap: 5px; }
+  #btnFire { width: 89px; height: 73px; font-size: 11px; }
+  .touchBtn { font-size: 9px; border-radius: 8px; }
   #touchHint { display: none; }
 }
 
@@ -328,6 +330,34 @@ function fitCanvas() {
   const maxScale = isTouchDevice() ? 2.0 : 1;
   canvasScale = Math.max(0.1, Math.min(maxScale, scaleX, scaleY));
   canvas.style.transform = `scale(${canvasScale})`;
+  requestAnimationFrame(layoutMobileControls);
+}
+
+// スマホ横画面では操作ボタンをキャンバスの外側（黒い余白）へ逃がす。
+// 余白が足りない端末では最小位置に戻すが、ボタン自体は小さく薄くしてHUDを読みやすくする。
+function layoutMobileControls() {
+  if (!isTouchDevice()) return;
+  const vv = window.visualViewport;
+  const vw = vv ? vv.width : window.innerWidth;
+  const rect = canvas.getBoundingClientRect();
+  const actions = document.getElementById('actionButtons');
+  if (actions) {
+    actions.style.right = '';
+    const ar = actions.getBoundingClientRect();
+    const minRight = 14;
+    const gap = 10;
+    const avoidCanvasRight = vw - (rect.right + gap) - ar.width;
+    actions.style.right = `${Math.max(minRight, Math.floor(avoidCanvasRight))}px`;
+  }
+  const stick = document.getElementById('stickZone');
+  if (stick) {
+    stick.style.left = '';
+    const sr = stick.getBoundingClientRect();
+    const minLeft = 16;
+    const gap = 10;
+    const avoidCanvasLeft = rect.left - sr.width - gap;
+    stick.style.left = `${Math.max(minLeft, Math.floor(avoidCanvasLeft))}px`;
+  }
 }
 function updateOrientationNotice() {
   const n = document.getElementById('rotateNotice');
@@ -1138,10 +1168,11 @@ function tappedZombieFromClient(clientX, clientY) {
   for (const z of zombies) {
     if (!z || z.dead) continue;
     const zx = wx(z.x), zy = wy(z.y);
-    if (zx < -40 || zx > GW + 40 || zy < -40 || zy > GH + 40) continue;
+    if (zx < -70 || zx > GW + 70 || zy < -70 || zy > GH + 70) continue;
 
-    // 指で狙いやすいよう、実際の半径より少し広めに判定する。
-    const tapR = Math.max(28, (z.radius || 14) + 18);
+    // スマホの指で外しにくいよう、見た目よりかなり広めに判定する。
+    // 小型ゾンビでも半径44px、ボス/大型はさらに広くする。
+    const tapR = Math.max(44, (z.radius || 14) + 34);
     const dx = p.x - zx, dy = p.y - zy;
     const d = dx * dx + dy * dy;
     if (d <= tapR * tapR && d < bestD) {
@@ -1154,10 +1185,23 @@ function tappedZombieFromClient(clientX, clientY) {
 
 function attackTappedZombie(z) {
   if (!z || z.dead) return false;
+  // タップ時は「敵の中心」へ照準を補正してから通常のFire処理を呼ぶ。
+  // これにより弾薬、リロード、クールダウン、ナイフ判定は既存仕様のまま維持される。
   mouse.x = Math.max(0, Math.min(GW, wx(z.x)));
   mouse.y = Math.max(0, Math.min(GH, wy(z.y)));
   player.angle = Math.atan2(mouse.y - wy(player.y), mouse.x - wx(player.x));
+  mouse.down = true;
   shootPressed();
+  setTimeout(() => { mouse.down = false; }, 60);
+  return true;
+}
+
+function handleTapAttackFromClient(clientX, clientY) {
+  if (gameState !== 'playing') return false;
+  const z = tappedZombieFromClient(clientX, clientY);
+  if (!z) return false;
+  attackTappedZombie(z);
+  if (typeof lastTapAttackAt !== 'undefined') lastTapAttackAt = Date.now();
   return true;
 }
 function resetStick() {
@@ -1208,16 +1252,24 @@ canvas.addEventListener('touchstart', e => {
   }
 
   // プレイ中に敵を直接タップした場合は、その敵を狙って1回攻撃する。
-  if (gameState === 'playing') {
-    const z = tappedZombieFromClient(t.clientX, t.clientY);
-    if (z) {
-      mobile.aimId = t.identifier;
-      attackTappedZombie(z);
-      return;
-    }
+  if (handleTapAttackFromClient(t.clientX, t.clientY)) {
+    mobile.aimId = t.identifier;
+    return;
   }
 
   mobile.aimId = t.identifier;
+}, { passive: false });
+
+// iOS/Android のブラウザ差を吸収するため、Pointer Events でも敵タップ攻撃を拾う。
+// touchstart と二重発火しないよう短時間の抑制を入れる。
+let lastTapAttackAt = 0;
+canvas.addEventListener('pointerdown', e => {
+  if (!mobile.enabled || e.pointerType === 'mouse') return;
+  if (Date.now() - lastTapAttackAt < 120) return;
+  if (handleTapAttackFromClient(e.clientX, e.clientY)) {
+    lastTapAttackAt = Date.now();
+    e.preventDefault();
+  }
 }, { passive: false });
 canvas.addEventListener('touchmove', e => {
   if (!mobile.enabled) return;
