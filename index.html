@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content">
 <title>OUTBREAK.exe</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -14,7 +14,9 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
+  width: 100vw;
   height: 100vh;
+  height: 100dvh;
   font-family: 'Courier New', monospace;
   overflow: hidden;
 }
@@ -219,6 +221,28 @@ canvas {
   #touchHint { display: none; }
 }
 
+
+/* ── Landscape guard for smartphones ─────────────────────────────────────── */
+#rotateNotice {
+  position: fixed; inset: 0; z-index: 99;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.96); color: #fdd;
+  font-family: 'Courier New', monospace; text-align: center;
+  padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  touch-action: none;
+}
+#rotateNotice .box {
+  border: 1px solid #6a1717; padding: 22px 26px;
+  background: rgba(25,4,4,0.72);
+  box-shadow: inset 0 0 22px rgba(180,0,0,0.15), 0 0 24px rgba(0,0,0,0.55);
+}
+#rotateNotice .icon { font-size: 38px; margin-bottom: 12px; }
+#rotateNotice .title { color: #f55; font-size: 16px; letter-spacing: 2px; margin-bottom: 8px; }
+#rotateNotice .msg { color: #aaa; font-size: 12px; line-height: 1.8; }
+@media (hover: none) and (pointer: coarse) and (orientation: portrait) {
+  #rotateNotice { display: flex; }
+}
+
 </style>
 </head>
 <body>
@@ -268,6 +292,15 @@ canvas {
   </div>
   <div id="touchHint">左:移動 / 右画面ドラッグ:照準 / FIRE:射撃</div>
 </div>
+
+<div id="rotateNotice" aria-hidden="true">
+  <div class="box">
+    <div class="icon">↻</div>
+    <div class="title">横画面でプレイしてください</div>
+    <div class="msg">スマホを横向きにすると操作ボタンと画面が表示されます。<br>必要ならブラウザの回転ロックを解除してください。</div>
+  </div>
+</div>
+
 <script>
 'use strict';
 
@@ -285,16 +318,44 @@ function isTouchDevice() {
   return window.matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 }
 function fitCanvas() {
-  const scaleX = (window.innerWidth  - 4) / canvas.width;
-  const scaleY = (window.innerHeight - 4) / canvas.height;
-  // スマホでは少し拡大を許可し、横持ち時に画面を使い切る。PCでは従来どおり1倍上限。
-  const maxScale = isTouchDevice() ? 1.35 : 1;
-  canvasScale = Math.min(maxScale, scaleX, scaleY);
+  // iOS Safari のアドレスバー変化も拾えるよう visualViewport を優先する。
+  const vv = window.visualViewport;
+  const vw = vv ? vv.width  : window.innerWidth;
+  const vh = vv ? vv.height : window.innerHeight;
+  const scaleX = (vw - 4) / canvas.width;
+  const scaleY = (vh - 4) / canvas.height;
+  // スマホ横画面では画面いっぱいに縮小表示。PCでは従来どおり1倍上限。
+  const maxScale = isTouchDevice() ? 2.0 : 1;
+  canvasScale = Math.max(0.1, Math.min(maxScale, scaleX, scaleY));
   canvas.style.transform = `scale(${canvasScale})`;
 }
+function updateOrientationNotice() {
+  const n = document.getElementById('rotateNotice');
+  if (!n) return;
+  const portrait = isTouchDevice() && window.innerHeight > window.innerWidth;
+  n.setAttribute('aria-hidden', portrait ? 'false' : 'true');
+}
+async function requestLandscapeMode() {
+  // Android/一部ブラウザでは全画面化後に横画面ロックを試みる。iPhone Safariでは失敗しても無害。
+  try {
+    if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+      await document.documentElement.requestFullscreen();
+    }
+  } catch (e) {}
+  try {
+    if (screen.orientation && screen.orientation.lock) {
+      await screen.orientation.lock('landscape');
+    }
+  } catch (e) {}
+  fitCanvas();
+  updateOrientationNotice();
+  setTimeout(fitCanvas, 250);
+}
 fitCanvas();
-window.addEventListener('resize', fitCanvas);
-window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 80));
+updateOrientationNotice();
+window.addEventListener('resize', () => { fitCanvas(); updateOrientationNotice(); });
+if (window.visualViewport) window.visualViewport.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(() => { fitCanvas(); updateOrientationNotice(); }, 120));
 
 // ── TILE CONSTANTS ───────────────────────────────────────────────────────────
 const TS  = 40;   // tile size px
@@ -2879,6 +2940,7 @@ function snapshotWarehouse() {
 }
 
 function startGame() {
+  requestLandscapeMode();
   document.getElementById('overlay').style.display = 'none';
   currentStageIdx = 0;
   totalTime = 0;
