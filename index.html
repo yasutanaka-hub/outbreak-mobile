@@ -309,9 +309,13 @@ canvas {
 // ── CANVAS ──────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
+const LW = 320;              // left information/control panel width
 const GW = 680, GH = 560;   // game viewport
-const HW = 170;              // HUD width
-canvas.width  = GW + HW;
+const GAP = 12;              // panel gap
+const HW = 400;              // right HUD/control panel width
+const GAME_X = LW + GAP;
+const HUD_X  = GAME_X + GW + GAP;
+canvas.width  = LW + GAP + GW + GAP + HW;
 canvas.height = GH;
 
 // Scale canvas to fit viewport
@@ -1090,6 +1094,8 @@ function resetPlayer(cfg, keepWeapons = false, keepHp = false) {
 // ── INPUT ─────────────────────────────────────────────────────────────────────
 const keys  = {};
 const mouse = { x: GW / 2, y: GH / 2, down: false };
+function toGamePoint(p) { return { x: p.x - GAME_X, y: p.y }; }
+function clampGamePoint(p) { return { x: Math.max(0, Math.min(GW, p.x - GAME_X)), y: Math.max(0, Math.min(GH, p.y)) }; }
 
 document.addEventListener('keydown', e => {
   keys[e.code] = true;
@@ -1110,8 +1116,15 @@ document.addEventListener('keydown', e => {
 document.addEventListener('keyup', e => { keys[e.code] = false; });
 canvas.addEventListener('mousemove', e => {
   const rect = canvas.getBoundingClientRect();
-  mouse.x = (e.clientX - rect.left) / canvasScale;
-  mouse.y = (e.clientY - rect.top)  / canvasScale;
+  const rawX = (e.clientX - rect.left) / canvasScale;
+  const rawY = (e.clientY - rect.top)  / canvasScale;
+  if (gameState === 'playing') {
+    mouse.x = rawX - GAME_X;
+    mouse.y = rawY;
+  } else {
+    mouse.x = rawX;
+    mouse.y = rawY;
+  }
 });
 canvas.addEventListener('mousedown', e => {
   if (e.button === 0) { mouse.down = true; shootPressed(); }
@@ -1152,14 +1165,15 @@ function canvasPointFromClient(clientX, clientY) {
 }
 function updateAimFromClient(clientX, clientY) {
   const p = canvasPointFromClient(clientX, clientY);
-  mouse.x = Math.max(0, Math.min(canvas.width, p.x));
-  mouse.y = Math.max(0, Math.min(canvas.height, p.y));
+  const gp = clampGamePoint(p);
+  mouse.x = gp.x;
+  mouse.y = gp.y;
 }
 
 // スマホ操作：敵を直接タップしたとき、その敵へ照準を合わせて1回攻撃する。
 // 画面右のHUDではなくゲーム画面内（GW×GH）だけを対象にする。
 function tappedZombieFromClient(clientX, clientY) {
-  const p = canvasPointFromClient(clientX, clientY);
+  const p = toGamePoint(canvasPointFromClient(clientX, clientY));
   if (p.x < 0 || p.x > GW || p.y < 0 || p.y > GH) return null;
   if (typeof zombies === 'undefined' || !Array.isArray(zombies)) return null;
 
@@ -3536,6 +3550,10 @@ function closeWorkbench() {
 function draw() {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  drawLayoutBackground();
+
+  ctx.save();
+  ctx.translate(GAME_X, 0);
 
   ctx.save();
   ctx.beginPath();
@@ -4221,6 +4239,11 @@ function draw() {
   // ─ デコイ状態（DECOY ACTIVE・専用表示。decoyNoiseTimer を読むだけ・NOISE ALERT とは別） ─
   if (gameState === 'playing') drawDecoyStatus();
 
+  ctx.restore(); // end translated game viewport
+
+  // ─ 左サイドパネル ─
+  drawLeftPanel();
+
   // ─ HUD ─
   drawHUD();
 
@@ -4712,295 +4735,246 @@ function infectionStatus(inf) {
   return          { label: 'CRITICAL', color: '#f33', text: '#fbb', blink: 0.55 + 0.45 * Math.sin(gameTime * 11) };        // 強め
 }
 
-function drawHUD() {
-  const hx = GW;
+function roundedRect(x, y, w, h, r = 8) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+}
 
-  // HUD background
-  ctx.fillStyle = '#0a0a0a';
-  ctx.fillRect(hx, 0, HW, GH);
-  ctx.strokeStyle = '#300';
+function drawPanelBox(x, y, w, h, stroke = '#444', fill = 'rgba(10,10,10,0.82)', r = 8) {
+  ctx.save();
+  roundedRect(x, y, w, h, r);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawLayoutBackground() {
+  ctx.save();
+  ctx.fillStyle = '#030303';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
   ctx.lineWidth = 1;
-  ctx.strokeRect(hx, 0, HW, GH);
+  drawPanelBox(0, 0, LW, GH, '#0cc', 'rgba(0,18,20,0.35)', 8);
+  drawPanelBox(GAME_X, 0, GW, GH, '#333', 'rgba(10,10,10,0.4)', 4);
+  drawPanelBox(HUD_X, 0, HW, GH, '#555', 'rgba(12,12,12,0.72)', 6);
+  // faint grid over entire canvas
+  ctx.globalAlpha = 0.22;
+  ctx.strokeStyle = '#123';
+  for (let x = 0; x < canvas.width; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, GH); ctx.stroke(); }
+  for (let y = 0; y < GH; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+  ctx.restore();
+}
 
-  // Title + Stage
-  const cfg = stageCfg();
-  ctx.fillStyle = cfg ? cfg.color : '#900';
-  ctx.font = 'bold 13px Courier New';
+function drawLeftPanel() {
+  const x = 0;
+  const pad = 10;
+  // Map panel
+  drawPanelBox(x + pad, 8, LW - pad * 2, 270, '#0cc', 'rgba(0,22,24,0.78)', 8);
+  ctx.fillStyle = '#0ff';
+  ctx.font = 'bold 14px Courier New';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText('OUTBREAK.exe', hx + HW / 2, 6);
-  ctx.fillStyle = '#555';
-  ctx.font = '10px Courier New';
-  ctx.fillText(cfg ? `${cfg.name} / ${cfg.sub}` : '', hx + HW / 2, 21);
+  ctx.fillText('開拓済みマップ', x + LW / 2, 20);
+  ctx.fillStyle = '#0cf';
+  ctx.font = 'bold 18px Courier New';
+  ctx.textAlign = 'right';
+  ctx.fillText('▶', x + LW - 22, 18);
+  drawMinimap(x + 28, 58, LW - 56, 204);
 
-  ctx.strokeStyle = '#400';
+  // Legend
+  const ly = 246;
+  ctx.font = '11px Courier New';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#28cfff'; ctx.fillText('◆', x + 28, ly + 8);
+  ctx.fillStyle = '#ddd'; ctx.fillText('プレイヤー', x + 44, ly + 8);
+  ctx.fillStyle = '#f33'; ctx.fillText('♥', x + 124, ly + 8);
+  ctx.fillStyle = '#ddd'; ctx.fillText('回復薬', x + 142, ly + 8);
+  ctx.fillStyle = '#ffe04a'; ctx.fillText('■', x + 214, ly + 8);
+  ctx.fillStyle = '#ddd'; ctx.fillText('アイテム', x + 232, ly + 8);
+
+  // Materials information bar
+  drawPanelBox(x + pad, 288, LW - pad * 2, 38, '#0cc', 'rgba(0,10,12,0.88)', 6);
+  ctx.font = 'bold 13px Courier New';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = player.scrap > 0 ? '#cfd8e8' : '#ddd';
+  ctx.fillText(`⚙ スクラップ ${player.scrap | 0}`, x + 22, 307);
+  ctx.strokeStyle = '#0cc'; ctx.globalAlpha = 0.75; ctx.beginPath(); ctx.moveTo(x + 118, 294); ctx.lineTo(x + 118, 322); ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.fillStyle = player.parts > 0 ? '#9fdbbf' : '#ddd';
+  ctx.fillText(`🔩 精密パーツ ${player.parts | 0}`, x + 132, 307);
+  ctx.strokeStyle = '#0cc'; ctx.globalAlpha = 0.75; ctx.beginPath(); ctx.moveTo(x + 236, 294); ctx.lineTo(x + 236, 322); ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.fillStyle = player.hasToolbox ? '#f88' : '#ddd';
+  ctx.fillText(player.hasToolbox ? '🧰 所持' : '🧰 未入手', x + 246, 307);
+
+  // Joystick panel (visual only; touch logic remains handled by existing zones)
+  drawPanelBox(x + pad, 338, LW - pad * 2, 214, '#222', 'rgba(0,0,0,0.74)', 6);
+  const cx = x + LW / 2, cy = 438;
+  const g = ctx.createRadialGradient(cx, cy, 24, cx, cy, 98);
+  g.addColorStop(0, 'rgba(40,220,220,0.30)');
+  g.addColorStop(0.55, 'rgba(20,120,120,0.12)');
+  g.addColorStop(1, 'rgba(0,0,0,0.2)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(cx, cy, 98, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#178a96'; ctx.lineWidth = 1.1; ctx.stroke();
+  ctx.fillStyle = 'rgba(70,210,210,0.42)';
+  ctx.beginPath(); ctx.arc(cx, cy, 48, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#4fffff'; ctx.lineWidth = 1.3; ctx.stroke();
+}
+
+function drawHUD() {
+  const hx = HUD_X;
+  const pad = 24;
+  drawPanelBox(hx, 0, HW, GH, '#555', 'rgba(12,12,12,0.88)', 6);
+
+  const cfg = stageCfg();
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ff3333';
+  ctx.font = 'bold 22px Courier New';
+  ctx.fillText('OUTBREAK.exe', hx + HW / 2, 14);
+  ctx.fillStyle = '#d8d8d8';
+  ctx.font = 'bold 14px Courier New';
+  ctx.fillText(cfg ? `${cfg.name} / ${cfg.sub}` : '', hx + HW / 2, 42);
+
+  ctx.strokeStyle = '#555';
   ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(hx + 10, 30); ctx.lineTo(hx + HW - 10, 30); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(hx + pad, 72); ctx.lineTo(hx + HW - pad, 72); ctx.stroke();
 
-  let yy = 42;
+  let y = 90;
+  const labelX = hx + pad;
+  const barX = hx + 96;
+  const barW = HW - 120;
+  const barH = 20;
 
   // HP
-  ctx.fillStyle = '#888';
-  ctx.font = '11px Courier New';
   ctx.textAlign = 'left';
-  ctx.fillText('HP', hx + 15, yy);
-  ctx.fillStyle = '#333';
-  ctx.fillRect(hx + 15, yy + 14, HW - 30, 12);
-  const hpColor = player.hp > 60 ? '#0c0' : player.hp > 30 ? '#cc0' : '#c00';
-  ctx.fillStyle = hpColor;
-  ctx.fillRect(hx + 15, yy + 14, (HW - 30) * (player.hp / player.maxHp), 12);
-  ctx.fillStyle = '#fff';
-  ctx.font = '10px Courier New';
-  ctx.textAlign = 'center';
-  ctx.fillText(`${Math.floor(player.hp)} / ${player.maxHp}`, hx + HW / 2, yy + 15);
-  yy += 30;
+  ctx.fillStyle = '#eee';
+  ctx.font = 'bold 15px Courier New';
+  ctx.fillText('HP', labelX, y + 4);
+  ctx.fillStyle = '#202020'; ctx.fillRect(barX, y, barW, barH);
+  const hpColor = player.hp > 60 ? '#00b800' : player.hp > 30 ? '#d0c000' : '#c00000';
+  ctx.fillStyle = hpColor; ctx.fillRect(barX, y, barW * (player.hp / player.maxHp), barH);
+  ctx.fillStyle = '#eaffea'; ctx.font = 'bold 16px Courier New'; ctx.textAlign = 'center';
+  ctx.fillText(`${Math.floor(player.hp)} / ${player.maxHp}`, barX + barW / 2, y + 1);
+  y += 30;
 
-  // Infection（INFECTION STATUS HUD：状態ラベル＋4段階色＋ラベル点滅。表示のみ・縦レイアウト不変）
-  ctx.fillStyle = '#888';
-  ctx.font = '11px Courier New';
-  ctx.textAlign = 'left';
-  ctx.fillText('感染度', hx + 15, yy);
-  ctx.fillStyle = '#333';
-  ctx.fillRect(hx + 15, yy + 14, HW - 30, 12);
-  const infPct = player.infection / 100;
+  // Infection
+  ctx.textAlign = 'left'; ctx.fillStyle = '#eee'; ctx.font = 'bold 15px Courier New';
+  ctx.fillText('感染度', labelX, y + 4);
+  ctx.fillStyle = '#202020'; ctx.fillRect(barX, y, barW, barH);
   const infv = Math.floor(player.infection);
   const st = infectionStatus(infv);
-  ctx.fillStyle = st.color;                              // バー塗りは状態色（4段階）
-  ctx.fillRect(hx + 15, yy + 14, (HW - 30) * infPct, 12);
-  // 数値部（白・点滅なし）＋ラベル部（状態色・DANGER/CRITICAL のみ点滅）を中央寄せで連結
-  // baseline は既存の 'top' を維持。点滅は save/restore で globalAlpha を隔離。
-  ctx.save();
-  ctx.font = '10px Courier New';
-  ctx.textAlign = 'left';
+  ctx.fillStyle = st.color; ctx.fillRect(barX, y, barW * (player.infection / 100), barH);
+  ctx.font = 'bold 15px Courier New'; ctx.textAlign = 'center';
   const pctStr = `${infv}% / `;
   const wNum = ctx.measureText(pctStr).width;
   const wLab = ctx.measureText(st.label).width;
-  const startX = hx + HW / 2 - (wNum + wLab) / 2;
-  const ty = yy + 15;
-  ctx.fillStyle = '#fff';
-  ctx.fillText(pctStr, startX, ty);
-  ctx.globalAlpha = st.blink;                            // ラベル部分のみ点滅
-  ctx.fillStyle = st.text;                               // バー塗り色と分離した明るい文字色
-  ctx.fillText(st.label, startX + wNum, ty);
-  ctx.restore();
-  yy += 30;
+  const sx = barX + barW / 2 - (wNum + wLab) / 2;
+  ctx.textAlign = 'left'; ctx.fillStyle = '#fff'; ctx.fillText(pctStr, sx, y + 2);
+  ctx.save(); ctx.globalAlpha = st.blink; ctx.fillStyle = st.text; ctx.fillText(st.label, sx + wNum, y + 2); ctx.restore();
+  y += 34;
 
-  // ── 武器セレクター ──
-  ctx.fillStyle = '#888';
-  ctx.font = '11px Courier New';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText('武器', hx + 15, yy);
-  yy += 14;
+  ctx.strokeStyle = '#333'; ctx.beginPath(); ctx.moveTo(hx + pad, y); ctx.lineTo(hx + HW - pad, y); ctx.stroke();
+  y += 14;
 
-  // スロット順（入手順）に最大8枠を4列×2段で表示（7武器目=クロスボウ対応・縦サイズ不変）。slot n = キー(n+1) = loadout[n]
-  const slotW = Math.floor((HW - 30 - 9) / 4);
-  for (let n = 0; n < 8; n++) {
+  // Weapons
+  ctx.fillStyle = '#aaa'; ctx.font = 'bold 15px Courier New'; ctx.textAlign = 'left';
+  ctx.fillText('武器', labelX, y);
+  y += 28;
+  const slotGap = 8;
+  const slotW = (HW - pad * 2 - slotGap * 3) / 4;
+  for (let n = 0; n < 4; n++) {
     const wIdx = n < player.loadout.length ? player.loadout[n] : -1;
     const empty = wIdx < 0;
     const w = empty ? null : WEAPONS[wIdx];
     const active = !empty && wIdx === player.weaponIdx;
-    const col = n % 4, rowOff = Math.floor(n / 4) * 24;
-    const bx = hx + 15 + col * (slotW + 3);
-    const by = yy + rowOff;
-    ctx.fillStyle = empty ? '#111' : active ? w.color : '#222';
-    ctx.fillRect(bx, by, slotW, 20);
-    ctx.strokeStyle = empty ? '#333' : active ? w.color : '#444';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(bx, by, slotW, 20);
-    ctx.fillStyle = empty ? '#333' : active ? '#000' : '#777';
-    ctx.font = 'bold 8px Courier New';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(empty ? `[${n+1}]--` : `[${n+1}]${w.name.slice(0,2)}`, bx + slotW / 2, by + 10);
-  }
-  yy += 46;
-
-  // Grenade count
-  ctx.fillStyle = player.grenadeCount > 0 ? '#4d4' : '#444';
-  ctx.font = '10px Courier New';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText(`[G] 手榴弾  ×${player.grenadeCount}`, hx + 15, yy + 2);
-  yy += 16;
-
-  // Molotov count
-  ctx.fillStyle = player.molotovCount > 0 ? '#e83' : '#444';
-  ctx.font = '10px Courier New';
-  ctx.fillText(`[H] 火炎瓶  ×${player.molotovCount}`, hx + 15, yy + 2);
-  yy += 16;
-
-  // Medkit count（携帯回復薬）
-  ctx.fillStyle = player.medkitCount > 0 ? '#5c8' : '#444';
-  ctx.font = '10px Courier New';
-  ctx.fillText(`[V] 回復薬  ×${player.medkitCount}`, hx + 15, yy + 2);
-  yy += 16;
-
-  // Decoy count（ノイズデコイ／非攻撃投擲・per-run）
-  ctx.fillStyle = player.decoyCount > 0 ? '#6cf' : '#444';
-  ctx.font = '10px Courier New';
-  ctx.fillText(`[B] デコイ  ×${player.decoyCount}`, hx + 15, yy + 2);
-  yy += 16;
-
-  // Scrap count
-  ctx.fillStyle = player.scrap > 0 ? '#9ab' : '#555';
-  ctx.font = '10px Courier New';
-  ctx.fillText(`⚙ スクラップ ×${player.scrap}`, hx + 15, yy + 2);
-  yy += 15;
-
-  // Precision parts count（同じ行の右寄せに防護服Lvを併記＝縦方向を増やさず見切れ回避）
-  ctx.fillStyle = player.parts > 0 ? '#6da' : '#555';
-  ctx.font = '10px Courier New';
-  ctx.textAlign = 'left';
-  ctx.fillText(`🔩 精密パーツ ×${player.parts}`, hx + 15, yy + 2);
-  ctx.fillStyle = (player.armorLevel | 0) > 0 ? '#9cf' : '#556';
-  ctx.textAlign = 'right';
-  ctx.fillText(`🛡Lv${player.armorLevel | 0}`, hx + HW - 15, yy + 2);
-  ctx.textAlign = 'left';
-  yy += 15;
-
-  // 合成素材：非ゼロのみ簡易表示（省スペース）。未所持なら「素材: —」
-  ctx.font = '10px Courier New';
-  ctx.textAlign = 'left';
-  const ownedMats = MAT_KEYS.filter(k => (player.mats[k] | 0) > 0);
-  if (ownedMats.length === 0) {
-    ctx.fillStyle = '#555';
-    ctx.fillText('素材: —', hx + 15, yy + 2);
-  } else {
-    ctx.fillStyle = '#888';
-    ctx.fillText('素材:', hx + 15, yy + 2);
-    let mx = hx + 15 + ctx.measureText('素材: ').width;
-    for (const k of ownedMats) {
-      const seg = `${MATERIALS[k].short}${player.mats[k] | 0} `;
-      ctx.fillStyle = MATERIALS[k].color;
-      ctx.fillText(seg, mx, yy + 2);
-      mx += ctx.measureText(seg).width;
+    const bx = hx + pad + n * (slotW + slotGap);
+    drawPanelBox(bx, y, slotW, 34, active ? '#bda000' : '#444', active ? 'rgba(80,70,0,0.55)' : 'rgba(20,20,20,0.88)', 3);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (empty) {
+      ctx.fillStyle = '#cfd8d0'; ctx.font = 'bold 16px Courier New'; ctx.fillText('▣', bx + slotW / 2, y + 17);
+    } else {
+      ctx.fillStyle = active ? '#ffe14a' : '#d8d8d8'; ctx.font = 'bold 12px Courier New'; ctx.fillText(w.name, bx + slotW / 2, y + 17);
     }
   }
-  yy += 16;
+  y += 46;
 
-  // Toolbox status
-  ctx.fillStyle = player.hasToolbox ? '#c66' : '#444';
-  ctx.font = '10px Courier New';
-  ctx.fillText(player.hasToolbox ? '🧰 工具箱 所持' : '🧰 工具箱 未入手', hx + 15, yy + 2);
-  yy += 16;
+  // Inventory 2 columns
+  const invRows = [
+    [`[G]  手榴弾`, player.grenadeCount, player.grenadeCount > 0 ? '#ffb36a' : '#d8d8d8', `[H]  火炎瓶`, player.molotovCount, player.molotovCount > 0 ? '#ff8a40' : '#d8d8d8'],
+    [`[V]  回復薬`, player.medkitCount, player.medkitCount > 0 ? '#7dffb5' : '#d8d8d8', `キット`, 0, '#d8d8d8'],
+    [`⚙  スクラップ`, player.scrap, player.scrap > 0 ? '#cfd8e8' : '#d8d8d8', `🔩 精密パーツ`, player.parts, player.parts > 0 ? '#9fdbbf' : '#d8d8d8'],
+    [`🧰 工具箱`, player.hasToolbox ? '入手' : '未入手', player.hasToolbox ? '#ff8888' : '#d8d8d8', ``, '', '#d8d8d8'],
+  ];
+  ctx.font = 'bold 14px Courier New'; ctx.textBaseline = 'top';
+  const col1 = hx + pad + 8, col2 = hx + HW / 2 + 12;
+  for (const row of invRows) {
+    ctx.textAlign = 'left'; ctx.fillStyle = row[2]; ctx.fillText(row[0], col1, y);
+    ctx.textAlign = 'right'; ctx.fillStyle = row[2]; ctx.fillText(`×${row[1]}`, hx + HW / 2 - 12, y);
+    if (row[3]) {
+      ctx.textAlign = 'left'; ctx.fillStyle = row[5]; ctx.fillText(row[3], col2, y);
+      ctx.textAlign = 'right'; ctx.fillStyle = row[5]; ctx.fillText(`×${row[4]}`, hx + HW - pad - 8, y);
+    }
+    y += 24;
+  }
 
-  // ── 現在武器の弾薬 ──
+  ctx.strokeStyle = '#333'; ctx.beginPath(); ctx.moveTo(hx + pad, y + 4); ctx.lineTo(hx + HW - pad, y + 4); ctx.stroke();
+  y += 22;
+
   const cw = curWeapon();
-  ctx.fillStyle = '#888';
-  ctx.font = '11px Courier New';
-  ctx.textAlign = 'left';
-  const cwAmmoLabel = (cw.ammoType && AMMO_TYPES[cw.ammoType]) ? AMMO_TYPES[cw.ammoType].label : '弾薬';
-  ctx.fillText(cw.type === 'melee' ? 'ナイフ (無限)' : cwAmmoLabel, hx + 15, yy);
-  // 射程（タイル数）
-  ctx.fillStyle = '#6a8';
-  ctx.font = '10px Courier New';
-  ctx.textAlign = 'right';
-  ctx.fillText(`射程 ${Math.round(cw.range / TS)}`, hx + HW - 15, yy + 1);
-  yy += 14;
+  const clip = playerClip();
+  const ammoLabel = cw.type === 'melee' ? '弾薬' : '弾薬';
+  ctx.textAlign = 'left'; ctx.fillStyle = '#aaa'; ctx.font = 'bold 15px Courier New'; ctx.fillText(ammoLabel, labelX, y);
+  y += 26;
   if (cw.type !== 'melee') {
-    const clip = playerClip();
-    ctx.fillStyle = clip > 0 ? cw.color : '#a44';
-    ctx.font = 'bold 22px Courier New';
-    ctx.textAlign = 'left';
-    ctx.fillText(`${clip}`, hx + 15, yy);
-    ctx.fillStyle = '#666';
-    ctx.font = '14px Courier New';
-    ctx.fillText(` / ${reserveOf(player.weaponIdx)}`, hx + 42, yy + 3);
-
-    if (player.reloadTimer > 0) {
-      yy += 20;
-      const rp = 1 - player.reloadTimer / cw.reloadTime;
-      ctx.fillStyle = '#333';
-      ctx.fillRect(hx + 15, yy, HW - 30, 6);
-      ctx.fillStyle = '#8af';
-      ctx.fillRect(hx + 15, yy, (HW - 30) * rp, 6);
-      ctx.fillStyle = '#8af';
-      ctx.font = '10px Courier New';
-      ctx.textAlign = 'center';
-      ctx.fillText('リロード中...', hx + HW / 2, yy + 14);
-      yy += 10;
-    }
+    ctx.fillStyle = clip > 0 ? '#fff04a' : '#ff6666'; ctx.font = 'bold 28px Courier New'; ctx.fillText(`${clip}`, labelX, y);
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 18px Courier New'; ctx.fillText(` / ${reserveOf(player.weaponIdx)}`, labelX + 50, y + 7);
+    ctx.fillStyle = '#57e070'; ctx.font = 'bold 13px Courier New'; ctx.fillText(`射程 ${Math.round(cw.range / TS)}`, labelX, y + 38);
   } else {
-    ctx.fillStyle = cw.color;
-    ctx.font = 'bold 18px Courier New';
-    ctx.textAlign = 'left';
-    ctx.fillText('∞', hx + 15, yy);
+    ctx.fillStyle = cw.color; ctx.font = 'bold 28px Courier New'; ctx.fillText('∞', labelX, y);
+    ctx.fillStyle = '#57e070'; ctx.font = 'bold 13px Courier New'; ctx.fillText('近接', labelX, y + 38);
   }
-  yy += 24;
+  ctx.fillStyle = '#ddd'; ctx.font = 'bold 14px Courier New'; ctx.fillText('スタミナ', labelX, y + 66);
+  ctx.fillStyle = '#333'; ctx.fillRect(labelX, y + 88, 140, 8);
+  ctx.fillStyle = '#1292e8'; ctx.fillRect(labelX, y + 88, 140 * (player.stamina / 100), 8);
 
-  // 装備中の改造パーツ
-  const cmods = player.weaponMods[player.weaponIdx];
-  const activeMods = MODS.filter(m => cmods[m.key]);
-  if (activeMods.length > 0) {
-    ctx.fillStyle = '#c96';
-    ctx.font = '10px Courier New';
-    ctx.textAlign = 'left';
-    ctx.fillText(`改造: ${activeMods.map(m => m.short).join(' ')}`, hx + 15, yy);
+  // Action buttons area
+  const bTop = 315;
+  const smallW = 78, smallH = 50, gap = 10;
+  const btnX = hx + 150;
+  function button(x, y, w, h, text, big=false) {
+    drawPanelBox(x, y, w, h, big ? '#ff3030' : '#444', big ? 'rgba(150,0,0,0.78)' : 'rgba(24,24,24,0.88)', 4);
+    if (big) {
+      ctx.shadowColor = '#f22'; ctx.shadowBlur = 14;
+    }
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${big ? 28 : 16}px Courier New`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + w / 2, y + h / 2);
+    ctx.shadowBlur = 0;
   }
-  yy += 16;
+  button(btnX, bTop, smallW, smallH, 'DASH');
+  button(btnX, bTop + smallH + gap, smallW, smallH, 'E');
+  button(btnX + smallW + gap, bTop, 146, smallH * 2 + gap, 'FIRE', true);
 
-  // Stamina
-  ctx.fillStyle = '#888';
-  ctx.font = '11px Courier New';
-  ctx.textAlign = 'left';
-  ctx.fillText('スタミナ', hx + 15, yy);
-  ctx.fillStyle = '#333';
-  ctx.fillRect(hx + 15, yy + 14, HW - 30, 8);
-  ctx.fillStyle = '#28a';
-  ctx.fillRect(hx + 15, yy + 14, (HW - 30) * (player.stamina / 100), 8);
-  yy += 26;
-
-  ctx.strokeStyle = '#300';
-  ctx.beginPath(); ctx.moveTo(hx + 10, yy); ctx.lineTo(hx + HW - 10, yy); ctx.stroke();
-  yy += 8;
-
-  // Controls hint
-  ctx.fillStyle = '#444';
-  ctx.font = '10px Courier New';
-  ctx.textAlign = 'left';
-  const hints = ['WASD移動  Shift走  Click撃', 'E:拾得/ドア  R:リロード', '1-6武器 G手榴 H火炎 V回復B囮'];
-  for (const h of hints) {
-    ctx.fillText(h, hx + 15, yy);
-    yy += 14;
-  }
-  yy += 6;
-
-  ctx.strokeStyle = '#300';
-  ctx.beginPath(); ctx.moveTo(hx + 10, yy); ctx.lineTo(hx + HW - 10, yy); ctx.stroke();
-  yy += 10;
-
-  // ── Minimap（高さ動的：下部ラベル枠を確保しつつ残り高さに最大化・80〜110にクランプ） ──
-  const labelsH = escapeExitPos ? 48 : 34;   // ゾンビ残り＋(脱出口あり)＋タイム
-  const mmY = yy;
-  // 残り高さに合わせて最大化（通常80〜110）。リロードバー表示＋脱出口時は下限64まで縮めて見切れ回避
-  const mmH = Math.max(64, Math.min(110, GH - mmY - labelsH - 8));
-  drawMinimap(hx + 15, mmY, HW - 30, mmH);
-
-  // ── 下部ラベル：ミニマップ直下にスタック（重なり回避） ──
-  let ly = mmY + mmH + 6;
-  const alive = zombies.filter(z => !z.dead).length;
-  ctx.fillStyle = '#a33';
-  ctx.font = '11px Courier New';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.fillText(`ゾンビ残り: ${alive}`, hx + HW / 2, ly);
-  ly += 15;
-
-  // Safety floor indicator（脱出口あり・無いステージでは行ごと省略）
-  if (escapeExitPos) {
-    ctx.fillStyle = (Math.sin(gameTime * 4) > 0) ? '#6cf' : '#48a';
-    ctx.font = 'bold 11px Courier New';
-    ctx.fillText('⚠ 脱出口あり', hx + HW / 2, ly);
-    ly += 15;
-  }
-
-  // Time
-  const mins = Math.floor(gameTime / 60);
-  const secs = Math.floor(gameTime % 60);
-  ctx.fillStyle = '#555';
-  ctx.font = '11px Courier New';
-  ctx.fillText(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`, hx + HW / 2, ly);
+  const rowY1 = bTop + smallH * 2 + gap * 2;
+  const rowW = (HW - pad * 2 - gap * 2) / 3;
+  button(hx + pad, rowY1, rowW, 48, 'R');
+  button(hx + pad + rowW + gap, rowY1, rowW, 48, 'WEAPON');
+  button(hx + pad + (rowW + gap) * 2, rowY1, rowW, 48, 'G');
+  button(hx + pad, rowY1 + 58, rowW, 48, 'H');
+  button(hx + pad + rowW + gap, rowY1 + 58, rowW, 48, 'V');
+  button(hx + pad + (rowW + gap) * 2, rowY1 + 58, rowW, 48, 'B');
 }
 
 function drawMinimap(mx, my, mw, mh) {
@@ -5101,7 +5075,7 @@ function fmtTime(sec) {
 
 function drawOverlayBase(alpha = 0.82) {
   ctx.fillStyle = `rgba(0,0,0,${alpha})`;
-  ctx.fillRect(0, 0, GW + HW, GH);
+  ctx.fillRect(0, 0, canvas.width, GH);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 }
@@ -5114,28 +5088,28 @@ function drawStageIntroScreen() {
 
   ctx.fillStyle = cfg.color;
   ctx.font = 'bold 52px Courier New';
-  ctx.fillText(cfg.name, (GW + HW) / 2, GH / 2 - 40);
+  ctx.fillText(cfg.name, canvas.width / 2, GH / 2 - 40);
 
   ctx.fillStyle = '#aaa';
   ctx.font = '18px Courier New';
-  ctx.fillText(cfg.sub, (GW + HW) / 2, GH / 2 + 10);
+  ctx.fillText(cfg.sub, canvas.width / 2, GH / 2 + 10);
 
   // 難易度バー
   ctx.fillStyle = '#333';
-  ctx.fillRect((GW + HW) / 2 - 80, GH / 2 + 40, 160, 10);
+  ctx.fillRect(canvas.width / 2 - 80, GH / 2 + 40, 160, 10);
   ctx.fillStyle = cfg.color;
-  ctx.fillRect((GW + HW) / 2 - 80, GH / 2 + 40, 160 * (cfg.num / STAGE_CONFIGS.length), 10);
+  ctx.fillRect(canvas.width / 2 - 80, GH / 2 + 40, 160 * (cfg.num / STAGE_CONFIGS.length), 10);
   const stars = Math.round(cfg.num * 5 / STAGE_CONFIGS.length);
   ctx.fillStyle = '#666';
   ctx.font = '11px Courier New';
-  ctx.fillText(`難易度 ${'★'.repeat(stars)}${'☆'.repeat(5 - stars)}`, (GW + HW) / 2, GH / 2 + 62);
+  ctx.fillText(`難易度 ${'★'.repeat(stars)}${'☆'.repeat(5 - stars)}`, canvas.width / 2, GH / 2 + 62);
 
   // ── MISSION BRIEF（作戦ログ・表示のみ／最大2行） ──
   //   1行目＝authored brief（施設端末風）／2行目＝実配置から自動生成する STATUS タグ
   if (cfg.brief) {
     ctx.fillStyle = '#9bb';
     ctx.font = '13px Courier New';
-    ctx.fillText(`> ${cfg.brief}`, (GW + HW) / 2, GH / 2 + 88);
+    ctx.fillText(`> ${cfg.brief}`, canvas.width / 2, GH / 2 + 88);
   }
   // STATUS タグ：実在するフィールドのみ（脱出口=STAGE3/6 / 感染ゲート=4/6/8/10 / 物資箱=配置ステージ）
   const tags = [];
@@ -5146,7 +5120,7 @@ function drawStageIntroScreen() {
   if (tags.length) {
     ctx.fillStyle = '#c84';
     ctx.font = '11px Courier New';
-    ctx.fillText(`[ STATUS ] ${tags.join('  /  ')}`, (GW + HW) / 2, GH / 2 + 108);
+    ctx.fillText(`[ STATUS ] ${tags.join('  /  ')}`, canvas.width / 2, GH / 2 + 108);
   }
 
   ctx.globalAlpha = 1;
@@ -5223,7 +5197,7 @@ function handleOverlayClick(e) {
 // 武器タブ＋4項目の強化パネルを描画（clearButtons にクリック領域を登録）。
 // 戻り値: パネル下端の Y。
 function drawUpgradePanel(tabY) {
-  const cx = (GW + HW) / 2;
+  const cx = canvas.width / 2;
 
   // 選択中の武器が未所持なら最初の所持武器へ
   if (player.clips[upgradeSelWeapon] === null) {
@@ -5314,7 +5288,7 @@ function drawUpgradePanel(tabY) {
 
 // 改造パーツ（4つのトグルボタン）を描画。戻り値: 下端Y
 function drawModsSection(topY) {
-  const cx = (GW + HW) / 2;
+  const cx = canvas.width / 2;
   const panelX = cx - 320, panelW = 640;
   const wIdx = upgradeSelWeapon;
   const applic = modApplicable(wIdx);
@@ -5384,7 +5358,7 @@ function drawModsSection(topY) {
 
 function drawWorkbenchScreen() {
   drawOverlayBase(0.9);
-  const cx = (GW + HW) / 2;
+  const cx = canvas.width / 2;
   clearButtons = [];
 
   // ── ヘッダ ──
@@ -5468,7 +5442,7 @@ function drawStageClearScreen() {
   drawOverlayBase();
   const cfg  = stageCfg();
   const next = STAGE_CONFIGS[currentStageIdx + 1];
-  const cx = (GW + HW) / 2;
+  const cx = canvas.width / 2;
 
   ctx.fillStyle = '#ff8';
   ctx.font = 'bold 44px Courier New';
@@ -5506,29 +5480,29 @@ function drawGameClearScreen() {
 
   ctx.fillStyle = '#8f8';
   ctx.font = 'bold 46px Courier New';
-  ctx.fillText('GAME CLEAR', (GW + HW) / 2, GH / 2 - 70);
+  ctx.fillText('GAME CLEAR', canvas.width / 2, GH / 2 - 70);
 
   ctx.fillStyle = '#ff8';
   ctx.font = '16px Courier New';
-  ctx.fillText(`全${STAGE_CONFIGS.length}ステージ踏破。施設から脱出した。`, (GW + HW) / 2, GH / 2 - 22);
+  ctx.fillText(`全${STAGE_CONFIGS.length}ステージ踏破。施設から脱出した。`, canvas.width / 2, GH / 2 - 22);
 
   ctx.fillStyle = '#aaa';
   ctx.font = '14px Courier New';
-  ctx.fillText(`トータルタイム: ${fmtTime(totalTime)}`, (GW + HW) / 2, GH / 2 + 14);
+  ctx.fillText(`トータルタイム: ${fmtTime(totalTime)}`, canvas.width / 2, GH / 2 + 14);
 
   const alive = zombies.filter(z => !z.dead).length;
   ctx.fillStyle = '#a44';
-  ctx.fillText(`最終ステージ生存ゾンビ: ${alive}体`, (GW + HW) / 2, GH / 2 + 36);
+  ctx.fillText(`最終ステージ生存ゾンビ: ${alive}体`, canvas.width / 2, GH / 2 + 36);
 
   // ── RUN RESULT（完全脱出で倉庫へ反映された差分） ──
   ctx.fillStyle = '#8f8';
   ctx.font = '12px Courier New';
-  ctx.fillText('[ RUN RESULT ]  倉庫へ反映', (GW + HW) / 2, GH / 2 + 62);
-  const endY = drawRunResult((GW + HW) / 2, GH / 2 + 84, false);
+  ctx.fillText('[ RUN RESULT ]  倉庫へ反映', canvas.width / 2, GH / 2 + 62);
+  const endY = drawRunResult(canvas.width / 2, GH / 2 + 84, false);
 
   ctx.fillStyle = '#ccc';
   ctx.font = '13px Courier New';
-  ctx.fillText('クリックでタイトルへ', (GW + HW) / 2, endY + 16);
+  ctx.fillText('クリックでタイトルへ', canvas.width / 2, endY + 16);
 
   canvas.onclick = () => {
     canvas.onclick = null;
@@ -5571,36 +5545,36 @@ function drawDeadScreen() {
 
   ctx.fillStyle = '#c00';
   ctx.font = 'bold 48px Courier New';
-  ctx.fillText('YOU DIED', (GW + HW) / 2, GH / 2 - 60);
+  ctx.fillText('YOU DIED', canvas.width / 2, GH / 2 - 60);
 
   ctx.fillStyle = '#666';
   ctx.font = '14px Courier New';
-  ctx.fillText(cfg.name + ' — ' + cfg.sub, (GW + HW) / 2, GH / 2 - 22);
+  ctx.fillText(cfg.name + ' — ' + cfg.sub, canvas.width / 2, GH / 2 - 22);
 
   ctx.fillStyle = '#caa';
   ctx.font = '14px Courier New';
-  ctx.fillText('今回の探索で得たアイテムを持ち帰れなかった', (GW + HW) / 2, GH / 2 + 8);
+  ctx.fillText('今回の探索で得たアイテムを持ち帰れなかった', canvas.width / 2, GH / 2 + 8);
 
   // ── RUN RESULT（未反映・消失：プラス差分＝今回拾って失った分のみ） ──
   ctx.fillStyle = '#c66';
   ctx.font = '12px Courier New';
-  ctx.fillText('[ RUN RESULT ]  未反映・消失', (GW + HW) / 2, GH / 2 + 34);
-  const endY = drawRunResult((GW + HW) / 2, GH / 2 + 56, true);   // posOnly=true
+  ctx.fillText('[ RUN RESULT ]  未反映・消失', canvas.width / 2, GH / 2 + 34);
+  const endY = drawRunResult(canvas.width / 2, GH / 2 + 56, true);   // posOnly=true
 
   ctx.fillStyle = '#888';
   ctx.font = '12px Courier New';
-  ctx.fillText('（倉庫に保管済みのアイテムは無事）', (GW + HW) / 2, endY + 12);
+  ctx.fillText('（倉庫に保管済みのアイテムは無事）', canvas.width / 2, endY + 12);
 
   ctx.fillStyle = '#ccc';
   ctx.font = '13px Courier New';
-  ctx.fillText('クリックでタイトルへ', (GW + HW) / 2, endY + 38);
+  ctx.fillText('クリックでタイトルへ', canvas.width / 2, endY + 38);
 
   canvas.onclick = goToTitle;
 }
 
 function drawEscapeSuccessScreen() {
   drawOverlayBase(0.9);
-  const cx = (GW + HW) / 2;
+  const cx = canvas.width / 2;
 
   ctx.fillStyle = '#6cf';
   ctx.font = 'bold 40px Courier New';
