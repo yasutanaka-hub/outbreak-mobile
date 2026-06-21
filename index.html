@@ -160,43 +160,26 @@ canvas {
 }
 #stickBase, #stickKnob {
   position: absolute; border-radius: 50%; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  opacity: 0; pointer-events: none;
 }
-#stickBase {
-  width: 120px; height: 120px;
-  background: rgba(20,20,20,0.45); border: 1px solid rgba(120,180,180,0.35);
-  box-shadow: inset 0 0 18px rgba(0,180,180,0.10), 0 0 14px rgba(0,0,0,0.5);
-}
-#stickKnob {
-  width: 54px; height: 54px;
-  background: rgba(90,180,180,0.38); border: 1px solid rgba(180,255,255,0.45);
-  box-shadow: 0 0 12px rgba(80,220,220,0.25);
-}
+#stickBase { width: 120px; height: 120px; }
+#stickKnob { width: 54px; height: 54px; }
 #actionButtons {
-  right: max(14px, env(safe-area-inset-right));
-  bottom: max(14px, env(safe-area-inset-bottom));
-  display: grid; grid-template-columns: repeat(3, 46px); grid-auto-rows: 38px;
-  gap: 6px; pointer-events: none;
-  transition: right 0.15s ease, opacity 0.15s ease;
+  left: 0; top: 0; width: 100vw; height: 100vh;
+  display: block; pointer-events: none;
 }
 .touchBtn {
-  pointer-events: auto;
-  background: rgba(28,8,8,0.42); color: rgba(255,230,230,0.72);
-  border: 1px solid rgba(220,50,50,0.42); border-radius: 9px;
+  position: absolute; pointer-events: auto;
+  background: transparent; color: transparent;
+  border: 0; border-radius: 8px;
   font: bold 10px 'Courier New', monospace; letter-spacing: 1px;
-  box-shadow: inset 0 0 8px rgba(220,0,0,0.08), 0 0 10px rgba(0,0,0,0.35);
-  touch-action: none;
-  opacity: 0.72;
+  box-shadow: none; touch-action: none; opacity: 1;
 }
-.touchBtn:active, .touchBtn.down { background: rgba(150,0,0,0.82); color: #fff; opacity: 0.95; }
-#btnFire { grid-column: 2 / span 2; grid-row: 1 / span 2; width: 98px; height: 82px; border-radius: 14px; font-size: 12px; }
-#btnDash { grid-column: 1; grid-row: 1; }
-#btnInteract { grid-column: 1; grid-row: 2; }
-#btnReload { grid-column: 1; grid-row: 3; }
-#btnWeapon { grid-column: 2; grid-row: 3; }
-#btnGrenade { grid-column: 3; grid-row: 3; }
-#btnMolotov { grid-column: 1; grid-row: 4; }
-#btnMedkit { grid-column: 2; grid-row: 4; }
-#btnDecoy { grid-column: 3; grid-row: 4; }
+.touchBtn:active, .touchBtn.down {
+  background: rgba(150,0,0,0.24);
+  box-shadow: inset 0 0 12px rgba(255,80,80,0.18);
+}
+#btnFire { border-radius: 14px; }
 #touchHint {
   position: absolute; left: 50%; bottom: max(6px, env(safe-area-inset-bottom));
   transform: translateX(-50%); color: rgba(220,220,220,0.55);
@@ -222,6 +205,12 @@ canvas {
   .touchBtn { font-size: 9px; border-radius: 8px; }
   #touchHint { display: none; }
 }
+
+
+/* Canvas-integrated touch hit areas: visual UI is drawn on canvas, HTML controls stay invisible. */
+#mobileControls.show #actionButtons { left: 0 !important; top: 0 !important; right: auto !important; bottom: auto !important; display: block !important; width: 100vw !important; height: 100vh !important; }
+#mobileControls.show .touchBtn { position: absolute !important; min-width: 0 !important; min-height: 0 !important; padding: 0 !important; margin: 0 !important; color: transparent !important; background: transparent; border: 0 !important; box-shadow: none; }
+#mobileControls.show .touchBtn.down, #mobileControls.show .touchBtn:active { background: rgba(150,0,0,0.24) !important; }
 
 
 /* ── Landscape guard for smartphones ─────────────────────────────────────── */
@@ -339,30 +328,56 @@ function fitCanvas() {
 
 // スマホ横画面では操作ボタンをキャンバスの外側（黒い余白）へ逃がす。
 // 余白が足りない端末では最小位置に戻すが、ボタン自体は小さく薄くしてHUDを読みやすくする。
+function hudTouchRects() {
+  const hx = HUD_X;
+  const pad = 18;
+  const gap = 8;
+  const bTop = 394;
+  const leftW = 86;
+  const mainH = 92;
+  const smallH = (mainH - gap) / 2;
+  const fireX = hx + pad + leftW + gap;
+  const fireW = HW - pad * 2 - leftW - gap;
+  const rowTop = bTop + mainH + 8;
+  const rowH = 28;
+  const rowW = (HW - pad * 2 - gap * 2) / 3;
+  return {
+    btnDash:     [hx + pad, bTop, leftW, smallH],
+    btnInteract: [hx + pad, bTop + smallH + gap, leftW, smallH],
+    btnFire:     [fireX, bTop, fireW, mainH],
+    btnReload:   [hx + pad, rowTop, rowW, rowH],
+    btnWeapon:   [hx + pad + rowW + gap, rowTop, rowW, rowH],
+    btnGrenade:  [hx + pad + (rowW + gap) * 2, rowTop, rowW, rowH],
+    btnMolotov:  [hx + pad, rowTop + rowH + 6, rowW, rowH],
+    btnMedkit:   [hx + pad + rowW + gap, rowTop + rowH + 6, rowW, rowH],
+    btnDecoy:    [hx + pad + (rowW + gap) * 2, rowTop + rowH + 6, rowW, rowH],
+  };
+}
+
+function setTouchRect(el, rect, canvasRect) {
+  if (!el || !rect) return;
+  const [x, y, w, h] = rect;
+  el.style.left = `${Math.round(canvasRect.left + x * canvasScale)}px`;
+  el.style.top = `${Math.round(canvasRect.top + y * canvasScale)}px`;
+  el.style.width = `${Math.max(1, Math.round(w * canvasScale))}px`;
+  el.style.height = `${Math.max(1, Math.round(h * canvasScale))}px`;
+  el.style.right = 'auto';
+  el.style.bottom = 'auto';
+}
+
 function layoutMobileControls() {
   if (!isTouchDevice()) return;
-  const vv = window.visualViewport;
-  const vw = vv ? vv.width : window.innerWidth;
   const rect = canvas.getBoundingClientRect();
-  const actions = document.getElementById('actionButtons');
-  if (actions) {
-    actions.style.right = '';
-    const ar = actions.getBoundingClientRect();
-    const minRight = 14;
-    const gap = 10;
-    const avoidCanvasRight = vw - (rect.right + gap) - ar.width;
-    actions.style.right = `${Math.max(minRight, Math.floor(avoidCanvasRight))}px`;
-  }
+
+  // 操作用HTML要素は「見えない当たり判定」として、キャンバスに描いたUIへ正確に重ねる。
+  // これにより、スマホで右側ボタンや左スティックが二重表示・HUD被りしない。
   const stick = document.getElementById('stickZone');
-  if (stick) {
-    stick.style.left = '';
-    const sr = stick.getBoundingClientRect();
-    const minLeft = 16;
-    const gap = 10;
-    const avoidCanvasLeft = rect.left - sr.width - gap;
-    stick.style.left = `${Math.max(minLeft, Math.floor(avoidCanvasLeft))}px`;
-  }
+  if (stick) setTouchRect(stick, [LW / 2 - 112, 438 - 112, 224, 224], rect);
+
+  const rects = hudTouchRects();
+  for (const id in rects) setTouchRect(document.getElementById(id), rects[id], rect);
 }
+
 function updateOrientationNotice() {
   const n = document.getElementById('rotateNotice');
   if (!n) return;
@@ -4804,38 +4819,41 @@ function drawLeftPanel() {
   ctx.fillStyle = '#ffe04a'; ctx.fillText('■', x + 214, ly + 8);
   ctx.fillStyle = '#ddd'; ctx.fillText('アイテム', x + 232, ly + 8);
 
-  // Materials information bar
-  drawPanelBox(x + pad, 288, LW - pad * 2, 38, '#0cc', 'rgba(0,10,12,0.88)', 6);
-  ctx.font = 'bold 13px Courier New';
+  // Materials information panel: 1行に詰め込まず、素材と工具箱を分けて可読性を確保
+  drawPanelBox(x + pad, 288, LW - pad * 2, 56, '#0cc', 'rgba(0,10,12,0.88)', 6);
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#6ee';
+  ctx.font = 'bold 11px Courier New';
+  ctx.fillText('素材情報', x + 22, 296);
+  ctx.font = 'bold 13px Courier New';
   ctx.fillStyle = player.scrap > 0 ? '#cfd8e8' : '#ddd';
-  ctx.fillText(`⚙ スクラップ ${player.scrap | 0}`, x + 22, 307);
-  ctx.strokeStyle = '#0cc'; ctx.globalAlpha = 0.75; ctx.beginPath(); ctx.moveTo(x + 118, 294); ctx.lineTo(x + 118, 322); ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.fillText(`⚙ スクラップ  ${player.scrap | 0}`, x + 22, 316);
   ctx.fillStyle = player.parts > 0 ? '#9fdbbf' : '#ddd';
-  ctx.fillText(`🔩 精密パーツ ${player.parts | 0}`, x + 132, 307);
-  ctx.strokeStyle = '#0cc'; ctx.globalAlpha = 0.75; ctx.beginPath(); ctx.moveTo(x + 236, 294); ctx.lineTo(x + 236, 322); ctx.stroke(); ctx.globalAlpha = 1;
-  ctx.fillStyle = player.hasToolbox ? '#f88' : '#ddd';
-  ctx.fillText(player.hasToolbox ? '🧰 所持' : '🧰 未入手', x + 246, 307);
+  ctx.fillText(`🔩 精密パーツ  ${player.parts | 0}`, x + 158, 316);
+  ctx.fillStyle = player.hasToolbox ? '#f88' : '#aaa';
+  ctx.font = 'bold 12px Courier New';
+  ctx.fillText(player.hasToolbox ? '🧰 工具箱：所持' : '🧰 工具箱：未入手', x + 22, 332);
 
-  // Joystick panel (visual only; touch logic remains handled by existing zones)
-  drawPanelBox(x + pad, 338, LW - pad * 2, 214, '#222', 'rgba(0,0,0,0.74)', 6);
-  const cx = x + LW / 2, cy = 438;
-  const g = ctx.createRadialGradient(cx, cy, 24, cx, cy, 98);
+  // Joystick panel (visual only; touch hit-area is aligned by layoutMobileControls)
+  drawPanelBox(x + pad, 354, LW - pad * 2, 198, '#222', 'rgba(0,0,0,0.74)', 6);
+  const cx = x + LW / 2, cy = 442;
+  const g = ctx.createRadialGradient(cx, cy, 22, cx, cy, 88);
   g.addColorStop(0, 'rgba(40,220,220,0.30)');
   g.addColorStop(0.55, 'rgba(20,120,120,0.12)');
   g.addColorStop(1, 'rgba(0,0,0,0.2)');
   ctx.fillStyle = g;
-  ctx.beginPath(); ctx.arc(cx, cy, 98, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy, 88, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = '#178a96'; ctx.lineWidth = 1.1; ctx.stroke();
   ctx.fillStyle = 'rgba(70,210,210,0.42)';
-  ctx.beginPath(); ctx.arc(cx, cy, 48, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy, 44, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = '#4fffff'; ctx.lineWidth = 1.3; ctx.stroke();
 }
 
 function drawHUD() {
   const hx = HUD_X;
-  const pad = 24;
+  const pad = 18;
+  const innerW = HW - pad * 2;
   drawPanelBox(hx, 0, HW, GH, '#555', 'rgba(12,12,12,0.88)', 6);
 
   const cfg = stageCfg();
@@ -4843,138 +4861,130 @@ function drawHUD() {
   ctx.textAlign = 'center';
   ctx.fillStyle = '#ff3333';
   ctx.font = 'bold 22px Courier New';
-  ctx.fillText('OUTBREAK.exe', hx + HW / 2, 14);
+  ctx.fillText('OUTBREAK.exe', hx + HW / 2, 12);
   ctx.fillStyle = '#d8d8d8';
-  ctx.font = 'bold 14px Courier New';
-  ctx.fillText(cfg ? `${cfg.name} / ${cfg.sub}` : '', hx + HW / 2, 42);
+  ctx.font = 'bold 13px Courier New';
+  ctx.fillText(cfg ? `${cfg.name} / ${cfg.sub}` : '', hx + HW / 2, 40);
 
   ctx.strokeStyle = '#555';
   ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(hx + pad, 72); ctx.lineTo(hx + HW - pad, 72); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(hx + pad, 66); ctx.lineTo(hx + HW - pad, 66); ctx.stroke();
 
-  let y = 90;
-  const labelX = hx + pad;
-  const barX = hx + 96;
-  const barW = HW - 120;
-  const barH = 20;
+  // ── Status ──
+  drawPanelBox(hx + pad, 78, innerW, 68, '#444', 'rgba(18,18,18,0.86)', 5);
+  const labelX = hx + pad + 14;
+  const barX = hx + pad + 92;
+  const barW = innerW - 110;
+  const barH = 18;
+  let y = 92;
 
-  // HP
   ctx.textAlign = 'left';
   ctx.fillStyle = '#eee';
-  ctx.font = 'bold 15px Courier New';
-  ctx.fillText('HP', labelX, y + 4);
+  ctx.font = 'bold 14px Courier New';
+  ctx.fillText('HP', labelX, y + 2);
   ctx.fillStyle = '#202020'; ctx.fillRect(barX, y, barW, barH);
   const hpColor = player.hp > 60 ? '#00b800' : player.hp > 30 ? '#d0c000' : '#c00000';
   ctx.fillStyle = hpColor; ctx.fillRect(barX, y, barW * (player.hp / player.maxHp), barH);
-  ctx.fillStyle = '#eaffea'; ctx.font = 'bold 16px Courier New'; ctx.textAlign = 'center';
+  ctx.fillStyle = '#eaffea'; ctx.font = 'bold 14px Courier New'; ctx.textAlign = 'center';
   ctx.fillText(`${Math.floor(player.hp)} / ${player.maxHp}`, barX + barW / 2, y + 1);
-  y += 30;
 
-  // Infection
-  ctx.textAlign = 'left'; ctx.fillStyle = '#eee'; ctx.font = 'bold 15px Courier New';
-  ctx.fillText('感染度', labelX, y + 4);
+  y = 118;
+  ctx.textAlign = 'left'; ctx.fillStyle = '#eee'; ctx.font = 'bold 14px Courier New';
+  ctx.fillText('感染度', labelX, y + 2);
   ctx.fillStyle = '#202020'; ctx.fillRect(barX, y, barW, barH);
   const infv = Math.floor(player.infection);
   const st = infectionStatus(infv);
   ctx.fillStyle = st.color; ctx.fillRect(barX, y, barW * (player.infection / 100), barH);
-  ctx.font = 'bold 15px Courier New'; ctx.textAlign = 'center';
+  ctx.font = 'bold 13px Courier New';
   const pctStr = `${infv}% / `;
   const wNum = ctx.measureText(pctStr).width;
   const wLab = ctx.measureText(st.label).width;
   const sx = barX + barW / 2 - (wNum + wLab) / 2;
   ctx.textAlign = 'left'; ctx.fillStyle = '#fff'; ctx.fillText(pctStr, sx, y + 2);
   ctx.save(); ctx.globalAlpha = st.blink; ctx.fillStyle = st.text; ctx.fillText(st.label, sx + wNum, y + 2); ctx.restore();
-  y += 34;
 
-  ctx.strokeStyle = '#333'; ctx.beginPath(); ctx.moveTo(hx + pad, y); ctx.lineTo(hx + HW - pad, y); ctx.stroke();
-  y += 14;
-
-  // Weapons
-  ctx.fillStyle = '#aaa'; ctx.font = 'bold 15px Courier New'; ctx.textAlign = 'left';
-  ctx.fillText('武器', labelX, y);
-  y += 28;
+  // ── Weapon slots: 4列×2段、最大8枠 ──
+  drawPanelBox(hx + pad, 156, innerW, 92, '#444', 'rgba(16,16,16,0.86)', 5);
+  ctx.fillStyle = '#aaa'; ctx.font = 'bold 13px Courier New'; ctx.textAlign = 'left';
+  ctx.fillText('武器', hx + pad + 12, 166);
   const slotGap = 8;
-  const slotW = (HW - pad * 2 - slotGap * 3) / 4;
-  for (let n = 0; n < 4; n++) {
+  const slotW = (innerW - slotGap * 3 - 20) / 4;
+  const slotH = 27;
+  const slotX0 = hx + pad + 10;
+  const slotY0 = 188;
+  for (let n = 0; n < 8; n++) {
     const wIdx = n < player.loadout.length ? player.loadout[n] : -1;
     const empty = wIdx < 0;
     const w = empty ? null : WEAPONS[wIdx];
     const active = !empty && wIdx === player.weaponIdx;
-    const bx = hx + pad + n * (slotW + slotGap);
-    drawPanelBox(bx, y, slotW, 34, active ? '#bda000' : '#444', active ? 'rgba(80,70,0,0.55)' : 'rgba(20,20,20,0.88)', 3);
+    const bx = slotX0 + (n % 4) * (slotW + slotGap);
+    const by = slotY0 + Math.floor(n / 4) * (slotH + 7);
+    drawPanelBox(bx, by, slotW, slotH, active ? '#bda000' : '#444', active ? 'rgba(80,70,0,0.55)' : 'rgba(20,20,20,0.88)', 3);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     if (empty) {
-      ctx.fillStyle = '#cfd8d0'; ctx.font = 'bold 16px Courier New'; ctx.fillText('▣', bx + slotW / 2, y + 17);
+      ctx.fillStyle = '#5e665e'; ctx.font = 'bold 14px Courier New'; ctx.fillText('▣', bx + slotW / 2, by + slotH / 2);
     } else {
-      ctx.fillStyle = active ? '#ffe14a' : '#d8d8d8'; ctx.font = 'bold 12px Courier New'; ctx.fillText(w.name, bx + slotW / 2, y + 17);
+      ctx.fillStyle = active ? '#ffe14a' : '#d8d8d8'; ctx.font = 'bold 10px Courier New'; ctx.fillText(w.name, bx + slotW / 2, by + slotH / 2);
     }
   }
-  y += 46;
 
-  // Inventory 2 columns
-  const invRows = [
-    [`[G]  手榴弾`, player.grenadeCount, player.grenadeCount > 0 ? '#ffb36a' : '#d8d8d8', `[H]  火炎瓶`, player.molotovCount, player.molotovCount > 0 ? '#ff8a40' : '#d8d8d8'],
-    [`[V]  回復薬`, player.medkitCount, player.medkitCount > 0 ? '#7dffb5' : '#d8d8d8', `キット`, 0, '#d8d8d8'],
-    [`⚙  スクラップ`, player.scrap, player.scrap > 0 ? '#cfd8e8' : '#d8d8d8', `🔩 精密パーツ`, player.parts, player.parts > 0 ? '#9fdbbf' : '#d8d8d8'],
-    [`🧰 工具箱`, player.hasToolbox ? '入手' : '未入手', player.hasToolbox ? '#ff8888' : '#d8d8d8', ``, '', '#d8d8d8'],
-  ];
-  ctx.font = 'bold 14px Courier New'; ctx.textBaseline = 'top';
-  const col1 = hx + pad + 8, col2 = hx + HW / 2 + 12;
-  for (const row of invRows) {
-    ctx.textAlign = 'left'; ctx.fillStyle = row[2]; ctx.fillText(row[0], col1, y);
-    ctx.textAlign = 'right'; ctx.fillStyle = row[2]; ctx.fillText(`×${row[1]}`, hx + HW / 2 - 12, y);
-    if (row[3]) {
-      ctx.textAlign = 'left'; ctx.fillStyle = row[5]; ctx.fillText(row[3], col2, y);
-      ctx.textAlign = 'right'; ctx.fillStyle = row[5]; ctx.fillText(`×${row[4]}`, hx + HW - pad - 8, y);
-    }
-    y += 24;
+  // ── Inventory / materials ──
+  drawPanelBox(hx + pad, 260, innerW, 70, '#444', 'rgba(16,16,16,0.82)', 5);
+  ctx.textBaseline = 'top';
+  ctx.font = 'bold 13px Courier New';
+  const c1 = hx + pad + 12;
+  const v1 = hx + pad + 162;
+  const c2 = hx + pad + 190;
+  const v2 = hx + HW - pad - 12;
+  function invLine(y, l1, v1txt, col1, l2, v2txt, col2) {
+    ctx.textAlign = 'left'; ctx.fillStyle = col1; ctx.fillText(l1, c1, y);
+    ctx.textAlign = 'right'; ctx.fillStyle = col1; ctx.fillText(v1txt, v1, y);
+    ctx.textAlign = 'left'; ctx.fillStyle = col2; ctx.fillText(l2, c2, y);
+    ctx.textAlign = 'right'; ctx.fillStyle = col2; ctx.fillText(v2txt, v2, y);
   }
+  invLine(272, '手榴弾', `×${player.grenadeCount | 0}`, player.grenadeCount > 0 ? '#ffb36a' : '#d8d8d8', '火炎瓶', `×${player.molotovCount | 0}`, player.molotovCount > 0 ? '#ff8a40' : '#d8d8d8');
+  invLine(294, '回復薬', `×${player.medkitCount | 0}`, player.medkitCount > 0 ? '#7dffb5' : '#d8d8d8', 'デコイ', `×${player.decoyCount | 0}`, player.decoyCount > 0 ? '#9fd0ff' : '#d8d8d8');
+  invLine(314, 'スクラップ', `${player.scrap | 0}`, player.scrap > 0 ? '#cfd8e8' : '#d8d8d8', '精密パーツ', `${player.parts | 0}`, player.parts > 0 ? '#9fdbbf' : '#d8d8d8');
+  ctx.textAlign = 'center'; ctx.fillStyle = player.hasToolbox ? '#ff8888' : '#888'; ctx.font = 'bold 11px Courier New';
+  ctx.fillText(player.hasToolbox ? '工具箱：所持' : '工具箱：未入手', hx + HW / 2, 332);
 
-  ctx.strokeStyle = '#333'; ctx.beginPath(); ctx.moveTo(hx + pad, y + 4); ctx.lineTo(hx + HW - pad, y + 4); ctx.stroke();
-  y += 22;
-
+  // ── Ammo / stamina ──
+  drawPanelBox(hx + pad, 342, innerW, 40, '#444', 'rgba(16,16,16,0.82)', 5);
   const cw = curWeapon();
   const clip = playerClip();
-  const ammoLabel = cw.type === 'melee' ? '弾薬' : '弾薬';
-  ctx.textAlign = 'left'; ctx.fillStyle = '#aaa'; ctx.font = 'bold 15px Courier New'; ctx.fillText(ammoLabel, labelX, y);
-  y += 26;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#aaa'; ctx.font = 'bold 12px Courier New'; ctx.fillText(cw.name, hx + pad + 12, 350);
   if (cw.type !== 'melee') {
-    ctx.fillStyle = clip > 0 ? '#fff04a' : '#ff6666'; ctx.font = 'bold 28px Courier New'; ctx.fillText(`${clip}`, labelX, y);
-    ctx.fillStyle = '#aaa'; ctx.font = 'bold 18px Courier New'; ctx.fillText(` / ${reserveOf(player.weaponIdx)}`, labelX + 50, y + 7);
-    ctx.fillStyle = '#57e070'; ctx.font = 'bold 13px Courier New'; ctx.fillText(`射程 ${Math.round(cw.range / TS)}`, labelX, y + 38);
+    ctx.fillStyle = clip > 0 ? '#fff04a' : '#ff6666'; ctx.font = 'bold 22px Courier New'; ctx.fillText(`${clip}`, hx + pad + 112, 348);
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 15px Courier New'; ctx.fillText(` / ${reserveOf(player.weaponIdx)}`, hx + pad + 150, 354);
+    ctx.fillStyle = '#57e070'; ctx.font = 'bold 11px Courier New'; ctx.fillText(`射程 ${Math.round(cw.range / TS)}`, hx + pad + 240, 354);
   } else {
-    ctx.fillStyle = cw.color; ctx.font = 'bold 28px Courier New'; ctx.fillText('∞', labelX, y);
-    ctx.fillStyle = '#57e070'; ctx.font = 'bold 13px Courier New'; ctx.fillText('近接', labelX, y + 38);
+    ctx.fillStyle = cw.color; ctx.font = 'bold 22px Courier New'; ctx.fillText('∞', hx + pad + 122, 348);
+    ctx.fillStyle = '#57e070'; ctx.font = 'bold 11px Courier New'; ctx.fillText('近接', hx + pad + 240, 354);
   }
-  ctx.fillStyle = '#ddd'; ctx.font = 'bold 14px Courier New'; ctx.fillText('スタミナ', labelX, y + 66);
-  ctx.fillStyle = '#333'; ctx.fillRect(labelX, y + 88, 140, 8);
-  ctx.fillStyle = '#1292e8'; ctx.fillRect(labelX, y + 88, 140 * (player.stamina / 100), 8);
+  ctx.fillStyle = '#333'; ctx.fillRect(hx + pad + 12, 374, innerW - 24, 5);
+  ctx.fillStyle = '#1292e8'; ctx.fillRect(hx + pad + 12, 374, (innerW - 24) * (player.stamina / 100), 5);
 
-  // Action buttons area
-  const bTop = 315;
-  const smallW = 78, smallH = 50, gap = 10;
-  const btnX = hx + 150;
-  function button(x, y, w, h, text, big=false) {
-    drawPanelBox(x, y, w, h, big ? '#ff3030' : '#444', big ? 'rgba(150,0,0,0.78)' : 'rgba(24,24,24,0.88)', 4);
-    if (big) {
-      ctx.shadowColor = '#f22'; ctx.shadowBlur = 14;
-    }
-    ctx.fillStyle = '#fff'; ctx.font = `bold ${big ? 28 : 16}px Courier New`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  // ── Action buttons ──
+  const rects = hudTouchRects();
+  function buttonById(id, text, big=false) {
+    const [x, y, w, h] = rects[id];
+    drawPanelBox(x, y, w, h, big ? '#ff3030' : '#444', big ? 'rgba(150,0,0,0.78)' : 'rgba(24,24,24,0.88)', big ? 8 : 4);
+    if (big) { ctx.shadowColor = '#f22'; ctx.shadowBlur = 14; }
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${big ? 26 : 14}px Courier New`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(text, x + w / 2, y + h / 2);
     ctx.shadowBlur = 0;
   }
-  button(btnX, bTop, smallW, smallH, 'DASH');
-  button(btnX, bTop + smallH + gap, smallW, smallH, 'E');
-  button(btnX + smallW + gap, bTop, 146, smallH * 2 + gap, 'FIRE', true);
-
-  const rowY1 = bTop + smallH * 2 + gap * 2;
-  const rowW = (HW - pad * 2 - gap * 2) / 3;
-  button(hx + pad, rowY1, rowW, 48, 'R');
-  button(hx + pad + rowW + gap, rowY1, rowW, 48, 'WEAPON');
-  button(hx + pad + (rowW + gap) * 2, rowY1, rowW, 48, 'G');
-  button(hx + pad, rowY1 + 58, rowW, 48, 'H');
-  button(hx + pad + rowW + gap, rowY1 + 58, rowW, 48, 'V');
-  button(hx + pad + (rowW + gap) * 2, rowY1 + 58, rowW, 48, 'B');
+  buttonById('btnDash', 'DASH');
+  buttonById('btnInteract', 'E');
+  buttonById('btnFire', 'FIRE', true);
+  buttonById('btnReload', 'R');
+  buttonById('btnWeapon', 'WEAPON');
+  buttonById('btnGrenade', 'G');
+  buttonById('btnMolotov', 'H');
+  buttonById('btnMedkit', 'V');
+  buttonById('btnDecoy', 'B');
 }
 
 function drawMinimap(mx, my, mw, mh) {
