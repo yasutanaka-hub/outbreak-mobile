@@ -144,6 +144,28 @@ canvas {
 #overlay .purge button.yes:hover { background: #600; color: #fff; border-color: #c00; }
 #overlay .purge .done { display: none; color: #5a5a5a; font-size: 11px; letter-spacing: 2px; }
 
+/* ── PLAYER ID 選択／入力 UI ── */
+#overlay .playerSelect { display: flex; gap: 16px; justify-content: center; }
+#overlay .idPanel {
+  display: none; flex-direction: column; align-items: center; gap: 10px;
+  border: 1px solid #2a3a3a; padding: 16px 22px; margin-top: 4px;
+  background: rgba(6,14,16,0.5); box-shadow: inset 0 0 18px rgba(0,120,120,0.08);
+  min-width: 300px; max-width: 92vw;
+}
+#overlay .idPanel .idTitle { color: #6cc; letter-spacing: 2px; font-size: 12px; }
+#overlay .idPanel input {
+  width: 240px; max-width: 80vw; padding: 8px 10px; text-align: center;
+  background: #0a1416; color: #9ee; border: 1px solid #2a4a4a;
+  font-family: 'Courier New', monospace; font-size: 15px; letter-spacing: 2px;
+}
+#overlay .idPanel input:focus { outline: none; border-color: #4aa; box-shadow: 0 0 8px rgba(0,180,180,0.3); }
+#overlay .idPanel .note { color: #557; font-size: 10px; line-height: 1.6; max-width: 300px; text-align: center; }
+#overlay .idPanel .msg { color: #c66; font-size: 11px; min-height: 14px; letter-spacing: 1px; }
+#overlay .idPanel .idBtns { display: flex; gap: 12px; }
+#overlay .idPanel button { padding: 8px 22px; font-size: 13px; letter-spacing: 2px; }
+#overlay .idPanel .ovwConfirm { display: none; flex-direction: column; align-items: center; gap: 8px; }
+#overlay .idPanel .ovwConfirm .warn { color: #e90; font-size: 12px; letter-spacing: 1px; }
+
 /* ── Smartphone touch controls ────────────────────────────────────────────── */
 #mobileControls {
   position: fixed; inset: 0; z-index: 9;
@@ -194,6 +216,9 @@ canvas {
   #overlay .controls .row { grid-template-columns: 116px auto; }
   #overlay .warehouse { font-size: 11px; min-width: 250px; padding: 10px 16px; margin-bottom: 14px; }
   #overlay button { padding: 12px 26px; font-size: 14px; }
+  #overlay .idPanel { min-width: 0; width: 92vw; padding: 14px 16px; }
+  #overlay .idPanel input { width: 80vw; }
+  #overlay .playerSelect { gap: 12px; }
   #overlay .syslog { display: none; }
 }
 @media (max-width: 560px) {
@@ -251,12 +276,36 @@ canvas {
     <div class="objective">物資を確保し、生還せよ</div>
   </div>
   <div class="warehouse" id="warehouseStatus"></div>
-  <button onclick="startGame()">[ ENTER FACILITY ]</button>
+  <div class="playerSelect" id="playerSelect">
+    <button onclick="onContinue()">[ CONTINUE ]</button>
+    <button onclick="onNewGame()">[ NEW GAME ]</button>
+  </div>
+  <div class="idPanel" id="idPanel">
+    <div class="idTitle" id="idPanelTitle">PLAYER ID</div>
+    <input id="playerIdInput" maxlength="16" autocomplete="off" spellcheck="false"
+           placeholder="英数 _ - / 最大16文字" oninput="onIdInput()" onkeydown="onIdKeydown(event)">
+    <div class="note">
+      PLAYER IDはログインIDではなく、この端末内のセーブ識別名です。<br>
+      本名・メールアドレス・学籍番号などの個人情報は使わないでください。
+    </div>
+    <div class="msg" id="idMsg"></div>
+    <div class="idBtns" id="idMainBtns">
+      <button id="idSubmitBtn" onclick="onIdSubmit()">[ ENTER ]</button>
+      <button onclick="onIdCancel()">[ CANCEL ]</button>
+    </div>
+    <div class="ovwConfirm" id="ovwConfirm">
+      <span class="warn">このIDには既存セーブがあります。上書きして初期化しますか？</span>
+      <div class="idBtns">
+        <button class="yes" onclick="onOverwriteConfirm()">[ CONFIRM ]</button>
+        <button onclick="onOverwriteCancel()">[ CANCEL ]</button>
+      </div>
+    </div>
+  </div>
   <div class="syslog">SYS://QUARANTINE_ACTIVE<br>SYS://EXIT_ROUTE_UNSTABLE</div>
   <div class="purge">
     <button id="purgeBtn" onclick="requestPurge()">[ PURGE SAVE DATA ]</button>
     <div class="confirm" id="purgeConfirm">
-      <span class="warn">倉庫データを削除？</span>
+      <span class="warn">現在のPLAYER IDの倉庫データを削除？</span>
       <button class="yes" onclick="confirmPurge()">[ CONFIRM ]</button>
       <button onclick="cancelPurge()">[ CANCEL ]</button>
     </div>
@@ -963,7 +1012,60 @@ function craftRecipe(r) {
 // ── 倉庫（localStorage 永続保管）─────────────────────────────────────────────────
 // フェーズ1：ラン開始で READ コピー、脱出成功/完全脱出でのみ上書き保存。
 // 死亡では保存しない＝今回ランで得た分のみ失われるチェックポイント型。
-const WAREHOUSE_KEY = 'outbreak_warehouse';
+//
+// ── PLAYER ID 方式（outbreak.html から移植）──────────────────────────────────────
+// 保存キーを PLAYER ID 別に分離：outbreak_warehouse_<id>。現在ID＝outbreak_current_player_id。
+// 旧固定キー outbreak_warehouse は migrateLegacyWarehouseIfNeeded() で _default へコピー（旧キー非削除）。
+const LEGACY_WAREHOUSE_KEY = 'outbreak_warehouse';        // 旧固定キー（移行元・削除しない）
+const CURRENT_PLAYER_KEY   = 'outbreak_current_player_id'; // 現在の PLAYER ID 保存先
+const DEFAULT_PLAYER_ID    = 'default';                    // ID 未選択時のフォールバック
+const PLAYER_ID_MAXLEN     = 16;
+
+// 入力の正規化：英数・アンダースコア・ハイフンのみ残し、最大16文字に切り詰める。
+function sanitizePlayerId(raw) {
+  return String(raw == null ? '' : raw).replace(/[^A-Za-z0-9_-]/g, '').slice(0, PLAYER_ID_MAXLEN);
+}
+// 妥当な ID か（空・無効文字のみは false）。大文字小文字は区別する。
+function isValidPlayerId(id) {
+  return /^[A-Za-z0-9_-]{1,16}$/.test(id);
+}
+// 現在の PLAYER ID（未設定/無効なら default）。
+function getCurrentPlayerId() {
+  try {
+    const id = localStorage.getItem(CURRENT_PLAYER_KEY);
+    if (id && isValidPlayerId(id)) return id;
+  } catch (e) {}
+  return DEFAULT_PLAYER_ID;
+}
+// 現在の PLAYER ID を保存（妥当な場合のみ）。
+function setCurrentPlayerId(id) {
+  if (!isValidPlayerId(id)) return false;
+  try { localStorage.setItem(CURRENT_PLAYER_KEY, id); } catch (e) {}
+  return true;
+}
+// ID → 倉庫保存キー。
+function warehouseKeyForPlayer(playerId) {
+  const id = isValidPlayerId(playerId) ? playerId : DEFAULT_PLAYER_ID;
+  return 'outbreak_warehouse_' + id;
+}
+// 現在 ID の倉庫キー。
+function currentWarehouseKey() { return warehouseKeyForPlayer(getCurrentPlayerId()); }
+// 指定 ID のセーブが存在するか（READ 専用）。
+function playerWarehouseExists(playerId) {
+  if (!isValidPlayerId(playerId)) return false;
+  try { return localStorage.getItem(warehouseKeyForPlayer(playerId)) !== null; }
+  catch (e) { return false; }
+}
+// 旧固定キー → _default への一度きりコピー（旧キーは削除しない）。
+function migrateLegacyWarehouseIfNeeded() {
+  try {
+    const legacy = localStorage.getItem(LEGACY_WAREHOUSE_KEY);
+    const defKey = warehouseKeyForPlayer(DEFAULT_PLAYER_ID);
+    if (legacy !== null && localStorage.getItem(defKey) === null) {
+      localStorage.setItem(defKey, legacy);   // コピー（旧キー outbreak_warehouse は残す）
+    }
+  } catch (e) {}
+}
 
 function defaultWarehouse() {
   return {
@@ -978,9 +1080,9 @@ function defaultWarehouse() {
   };
 }
 
-function loadWarehouse() {
+function loadWarehouse(playerId = getCurrentPlayerId()) {
   try {
-    const raw = localStorage.getItem(WAREHOUSE_KEY);
+    const raw = localStorage.getItem(warehouseKeyForPlayer(playerId));
     if (!raw) return defaultWarehouse();
     const parsed = JSON.parse(raw);
     const wh = { ...defaultWarehouse(), ...parsed };  // 欠損フィールドはデフォルトで補完
@@ -1002,8 +1104,8 @@ function loadWarehouse() {
   }
 }
 
-function saveWarehouse(wh) {
-  try { localStorage.setItem(WAREHOUSE_KEY, JSON.stringify(wh)); } catch (e) {}
+function saveWarehouse(wh, playerId = getCurrentPlayerId()) {
+  try { localStorage.setItem(warehouseKeyForPlayer(playerId), JSON.stringify(wh)); } catch (e) {}
 }
 
 // 倉庫 → プレイヤー（ラン開始時の持ち込み・全部持ち込み）
@@ -3043,11 +3145,89 @@ function cancelPurge() {
 }
 function confirmPurge() {
   if (gameState !== 'title') return;          // 二重防御：ゲーム中は実行しない
-  localStorage.removeItem(WAREHOUSE_KEY);
+  try { localStorage.removeItem(currentWarehouseKey()); } catch (e) {}   // 現在の PLAYER ID の倉庫のみ削除
   document.getElementById('purgeConfirm').style.display = 'none';
   document.getElementById('purgeBtn').style.display = '';
   document.getElementById('purgeDone').style.display = 'block';
-  renderWarehouseStatus();   // PURGE 後は即座に初期倉庫表示へ更新
+  renderWarehouseStatus();   // PURGE 後は即座に初期倉庫表示へ更新（現在ID）
+}
+
+// ── PLAYER ID 入力フロー（タイトル画面のみ・倉庫保存タイミング/内容は不変）──────────
+let idPanelMode = null;   // 'continue' | 'new'
+let pendingNewId = null;  // NEW GAME 上書き確認の対象 ID
+const _id = (n) => document.getElementById(n);
+
+function _showIdPanel(mode) {
+  if (gameState !== 'title') return;
+  idPanelMode = mode;
+  pendingNewId = null;
+  _id('playerSelect').style.display = 'none';
+  _id('idPanel').style.display = 'flex';
+  _id('idPanelTitle').textContent = (mode === 'continue') ? 'CONTINUE — PLAYER ID' : 'NEW GAME — PLAYER ID';
+  _id('idMsg').textContent = '';
+  _id('ovwConfirm').style.display = 'none';
+  _id('idMainBtns').style.display = 'flex';
+  const inp = _id('playerIdInput');
+  inp.value = (mode === 'continue') ? getCurrentPlayerId() : '';   // CONTINUE は最後のIDを初期表示
+  inp.focus();
+  if (mode === 'continue' && inp.value) renderWarehouseStatus(inp.value);
+}
+function onContinue() { _showIdPanel('continue'); }
+function onNewGame()  { _showIdPanel('new'); }
+
+function onIdCancel() {
+  _id('idPanel').style.display = 'none';
+  _id('playerSelect').style.display = 'flex';
+  idPanelMode = null; pendingNewId = null;
+  renderWarehouseStatus();   // 現在IDの倉庫表示へ戻す
+}
+function onIdInput() {
+  const inp = _id('playerIdInput');
+  const clean = sanitizePlayerId(inp.value);
+  if (inp.value !== clean) inp.value = clean;   // 無効文字を即時除去
+  _id('idMsg').textContent = '';
+  // 入力中も妥当IDなら倉庫プレビュー（READ専用）
+  if (isValidPlayerId(clean)) renderWarehouseStatus(clean);
+}
+function onIdKeydown(e) {
+  // 入力欄でのキー操作はゲーム本体のキー処理へ伝播させない
+  if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); onIdSubmit(); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onIdCancel(); }
+  else { e.stopPropagation(); }
+}
+
+function _startGameForId(id) {
+  setCurrentPlayerId(id);   // 現在ID確定（以後 load/save/snapshot/render/purge は全てこのIDを参照）
+  startGame();              // mobile 既存 startGame() をそのまま呼ぶ（横画面処理など本体は不変）
+}
+function onIdSubmit() {
+  if (gameState !== 'title') return;
+  const id = sanitizePlayerId(_id('playerIdInput').value);
+  if (!isValidPlayerId(id)) { _id('idMsg').textContent = 'IDが無効です（英数 _ - のみ・1〜16文字）'; return; }
+  if (idPanelMode === 'continue') {
+    if (playerWarehouseExists(id)) { _startGameForId(id); }
+    else { _id('idMsg').textContent = 'このIDのセーブはありません。NEW GAMEから開始してください'; }
+  } else { // new
+    if (playerWarehouseExists(id)) {   // 既存 → 上書き確認
+      pendingNewId = id;
+      _id('idMainBtns').style.display = 'none';
+      _id('ovwConfirm').style.display = 'flex';
+    } else {                            // 新規 → 初期倉庫を作成して開始
+      saveWarehouse(defaultWarehouse(), id);
+      _startGameForId(id);
+    }
+  }
+}
+function onOverwriteConfirm() {
+  if (gameState !== 'title' || !pendingNewId) return;
+  saveWarehouse(defaultWarehouse(), pendingNewId);   // そのIDのみ初期化
+  _startGameForId(pendingNewId);
+}
+function onOverwriteCancel() {
+  pendingNewId = null;
+  _id('ovwConfirm').style.display = 'none';
+  _id('idMainBtns').style.display = 'flex';
+  // 既存セーブは保持（何もしない）
 }
 
 // ── RUN RESULT（回収結果ログ）：ラン開始時倉庫の表示用スナップショット ──
@@ -5514,11 +5694,7 @@ function drawGameClearScreen() {
   ctx.font = '13px Courier New';
   ctx.fillText('クリックでタイトルへ', canvas.width / 2, endY + 16);
 
-  canvas.onclick = () => {
-    canvas.onclick = null;
-    document.getElementById('overlay').style.display = 'flex';
-    gameState = 'title';
-  };
+  canvas.onclick = goToTitle;   // 死亡/脱出成功画面と統一（idPanel/playerSelect/倉庫表示/PURGE UI を初期化）
 }
 
 function goToTitle() {
@@ -5529,20 +5705,26 @@ function goToTitle() {
   document.getElementById('purgeConfirm').style.display = 'none';
   document.getElementById('purgeDone').style.display = 'none';
   document.getElementById('purgeBtn').style.display = '';
-  renderWarehouseStatus();   // タイトル復帰時に最新倉庫を反映
+  // PLAYER ID UI を初期状態へ戻す（選択肢表示・入力パネル非表示）
+  document.getElementById('idPanel').style.display = 'none';
+  document.getElementById('playerSelect').style.display = 'flex';
+  idPanelMode = null; pendingNewId = null;
+  renderWarehouseStatus();   // タイトル復帰時に最新倉庫（現在ID）を反映
 }
 
 // ── タイトル倉庫ステータス（表示のみ・loadWarehouse の READ 結果を表示） ──
-function renderWarehouseStatus() {
+// playerId 省略時は現在ID。入力プレビュー時は引数で対象IDを渡す。
+function renderWarehouseStatus(playerId = getCurrentPlayerId()) {
   const el = document.getElementById('warehouseStatus');
   if (!el) return;
-  const wh = loadWarehouse();   // READ 専用（保存処理は呼ばない）
+  const wh = loadWarehouse(playerId);   // READ 専用（保存処理は呼ばない）
   const owned = wh.owned.filter(Boolean).length;
   const a = wh.ammoReserve || {};
   const row = (label, val) =>
     `<div class="whRow"><span class="whLabel">${label}</span><span class="whVal">${val}</span></div>`;
   el.innerHTML =
     `<div class="whHead">[ WAREHOUSE STATUS ]</div>` +
+    row('PLAYER ID', playerId) +
     row('武器', `${owned} / ${WEAPONS.length}`) +
     row('弾薬', `9mm ${a['9mm'] | 0}　ｼｪﾙ ${a.shell | 0}　ﾏｸﾞﾅﾑ ${a.magnum | 0}`) +
     row('資材', `⚙ ${wh.scrap | 0}　🔩 ${wh.parts | 0}　🧨 ${wh.grenades | 0}`) +
@@ -5620,7 +5802,8 @@ function loop(t) {
   requestAnimationFrame(loop);
 }
 
-renderWarehouseStatus();   // 初期タイトル表示時に倉庫ステータスを描画
+migrateLegacyWarehouseIfNeeded();   // 旧 outbreak_warehouse → _default へ一度きりコピー（旧キー非削除）
+renderWarehouseStatus();   // 初期タイトル表示時に倉庫ステータスを描画（現在ID＝既定 default）
 </script>
 </body>
 </html>
