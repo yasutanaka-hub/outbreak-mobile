@@ -1272,6 +1272,13 @@ canvas.addEventListener('mouseup', e => {
   if (e.button === 0) mouse.down = false;
 });
 
+// ── GAME STATE（先行宣言）──────────────────────────────────────────────────────
+// title | stageIntro | playing | stageClear | gameClear | dead
+// initMobileControls()→updateMobileControlsVisibility() が gameState を参照するため、
+// スマホ(mobile.enabled=true)で TDZ「Cannot access 'gameState' before initialization」を
+// 起こさないよう、初回 initMobileControls() 呼び出しより前にここで宣言する。
+let gameState = 'title';
+
 // ── MOBILE / TOUCH INPUT ─────────────────────────────────────────────────────
 // PC操作を残したまま、タッチ入力を keys / mouse に変換する。
 const mobile = {
@@ -3149,7 +3156,7 @@ const STAGE_CONFIGS = [
 
 // ── GAME STATE ─────────────────────────────────────────────────────────────────
 // title | stageIntro | playing | stageClear | gameClear | dead
-let gameState = 'title';
+// ※ let gameState は上部の MOBILE/TOUCH INPUT 直前で先行宣言済み（TDZ回避）。ここでは二重宣言しない。
 let currentStageIdx = 0;  // 0..STAGE_CONFIGS.length-1（最終 index クリアで完全脱出＝倉庫保存）
 let gameTime  = 0;
 let stageTime = 0;
