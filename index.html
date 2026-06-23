@@ -102,6 +102,7 @@ canvas {
 
 /* ── 倉庫ステータス（表示のみ・施設端末風） ── */
 #overlay .warehouse {
+  display: none;   /* 案A段階表示：初期は非表示。PLAYER ID 入力パネル表示中のみ JS で block 表示 */
   border: 1px solid #3a1010; padding: 12px 22px; margin-bottom: 20px;
   background: rgba(20,4,4,0.3); box-shadow: inset 0 0 18px rgba(120,0,0,0.10);
   font-size: 12px; line-height: 1.8; text-align: left; min-width: 280px;
@@ -285,8 +286,8 @@ canvas {
     <input id="playerIdInput" maxlength="16" autocomplete="off" spellcheck="false"
            placeholder="英数 _ - / 最大16文字" oninput="onIdInput()" onkeydown="onIdKeydown(event)">
     <div class="note">
-      PLAYER IDはログインIDではなく、この端末内のセーブ識別名です。<br>
-      本名・メールアドレス・学籍番号などの個人情報は使わないでください。
+      PLAYER IDは、この端末内のセーブ識別名です。<br>
+      本名・メール・学籍番号は使わず、ニックネームを入力してください。
     </div>
     <div class="msg" id="idMsg"></div>
     <div class="idBtns" id="idMainBtns">
@@ -917,6 +918,24 @@ const MODS = [
 function freshWeaponMods() {
   return WEAPONS.map(() => ({ pierce: false, incendiary: false, explosive: false, silencer: false }));
 }
+
+// 旧セーブ互換：upgrades を WEAPONS.length 正規化（欠損補完＋壊れ値の安全化）。
+// 各ステータスは 0..UPG_MAX の整数にクランプ（NaN/負/小数/非数は 0）。既存レベルは保持。
+function normalizeUpgrades(arr) {
+  const clamp = (v) => Math.max(0, Math.min(UPG_MAX, (v | 0)));
+  return WEAPONS.map((_, i) => {
+    const u = (arr && typeof arr[i] === 'object' && arr[i]) ? arr[i] : {};
+    return { dmg: clamp(u.dmg), clip: clamp(u.clip), reload: clamp(u.reload), fire: clamp(u.fire) };
+  });
+}
+// 旧セーブ互換：weaponMods を WEAPONS.length 正規化（欠損補完＋壊れ値の安全化）。
+// 各パーツは真偽値へ正規化。既存の装備済みフラグは保持。
+function normalizeWeaponMods(arr) {
+  return WEAPONS.map((_, i) => {
+    const m = (arr && typeof arr[i] === 'object' && arr[i]) ? arr[i] : {};
+    return { pierce: !!m.pierce, incendiary: !!m.incendiary, explosive: !!m.explosive, silencer: !!m.silencer };
+  });
+}
 function modApplicable(wIdx) { return WEAPONS[wIdx].type !== 'melee' && !WEAPONS[wIdx].noMods; }
 function canBuyMod(wIdx, key) {
   const m = MODS.find(x => x.key === key);
@@ -1092,6 +1111,9 @@ function loadWarehouse(playerId = getCurrentPlayerId()) {
     }
     // owned 配列長を WEAPONS.length に正規化（旧6要素セーブ→新規武器 index は false＝未所持で安全）
     wh.owned = WEAPONS.map((_, i) => !!(wh.owned && wh.owned[i]));
+    // upgrades/weaponMods を WEAPONS.length に正規化（旧6要素セーブ→新規武器(クロスボウ等)を補完・壊れ値を安全化）
+    wh.upgrades   = normalizeUpgrades(wh.upgrades);
+    wh.weaponMods = normalizeWeaponMods(wh.weaponMods);
     // ammoReserve のキー欠損はデフォルト値で補完（bolt 欠損の旧セーブも 0 補完される）
     wh.ammoReserve = normalizeAmmoReserve(wh.ammoReserve);
     wh.mats = normalizeMats(wh.mats);   // 合成素材：旧セーブは全0補完
@@ -1112,8 +1134,8 @@ function saveWarehouse(wh, playerId = getCurrentPlayerId()) {
 function applyWarehouseToPlayer() {
   const wh = loadWarehouse();
   player.clips      = WEAPONS.map((w, i) => wh.owned[i] ? w.clipSize : null);  // WEAPONS.length 駆動
-  player.upgrades   = wh.upgrades.map(u => ({ ...u }));
-  player.weaponMods = wh.weaponMods.map(m => ({ ...m }));
+  player.upgrades   = normalizeUpgrades(wh.upgrades);    // WEAPONS.length 保証（クロスボウ等の旧セーブ互換・二重防御）
+  player.weaponMods = normalizeWeaponMods(wh.weaponMods);
   player.scrap        = wh.scrap;
   player.parts        = wh.parts;
   player.mats         = normalizeMats(wh.mats);   // 合成素材：倉庫から持ち込み
@@ -1262,9 +1284,15 @@ const mobileControls = document.getElementById('mobileControls');
 const stickZone = document.getElementById('stickZone');
 const stickKnob = document.getElementById('stickKnob');
 
+// スマホ操作UI（#mobileControls＝#touchHint＋透明タッチボタン）の表示更新。
+// workbench 中は非表示にして、Canvas作業台の合成欄との重なり・タップ横取りを防ぐ。
+function updateMobileControlsVisibility() {
+  if (mobileControls) mobileControls.classList.toggle('show', mobile.enabled && gameState !== 'workbench');
+}
+
 function initMobileControls() {
   mobile.enabled = isTouchDevice();
-  if (mobileControls) mobileControls.classList.toggle('show', mobile.enabled);
+  updateMobileControlsVisibility();   // workbench中の resize/orientation でも再表示しない
   fitCanvas();
 }
 initMobileControls();
@@ -3157,6 +3185,16 @@ let idPanelMode = null;   // 'continue' | 'new'
 let pendingNewId = null;  // NEW GAME 上書き確認の対象 ID
 const _id = (n) => document.getElementById(n);
 
+// 案A段階表示：WAREHOUSE STATUS は ID 入力パネル表示中だけ可視（READ専用・保存には非関与）
+function showWarehouseFor(playerId) {
+  renderWarehouseStatus(playerId);
+  _id('warehouseStatus').style.display = 'block';   // 明示表示
+}
+function hideWarehouse() {
+  const el = _id('warehouseStatus');
+  if (el) el.style.display = 'none';
+}
+
 function _showIdPanel(mode) {
   if (gameState !== 'title') return;
   idPanelMode = mode;
@@ -3170,7 +3208,9 @@ function _showIdPanel(mode) {
   const inp = _id('playerIdInput');
   inp.value = (mode === 'continue') ? getCurrentPlayerId() : '';   // CONTINUE は最後のIDを初期表示
   inp.focus();
-  if (mode === 'continue' && inp.value) renderWarehouseStatus(inp.value);
+  // CONTINUE は初期IDが妥当なので倉庫を表示。NEW GAME は空入力のため非表示（妥当ID入力後に onIdInput が表示）
+  if (mode === 'continue' && isValidPlayerId(inp.value)) showWarehouseFor(inp.value);
+  else hideWarehouse();
 }
 function onContinue() { _showIdPanel('continue'); }
 function onNewGame()  { _showIdPanel('new'); }
@@ -3179,15 +3219,16 @@ function onIdCancel() {
   _id('idPanel').style.display = 'none';
   _id('playerSelect').style.display = 'flex';
   idPanelMode = null; pendingNewId = null;
-  renderWarehouseStatus();   // 現在IDの倉庫表示へ戻す
+  hideWarehouse();   // idPanel・倉庫を閉じて初期タイトルへ戻す
 }
 function onIdInput() {
   const inp = _id('playerIdInput');
   const clean = sanitizePlayerId(inp.value);
   if (inp.value !== clean) inp.value = clean;   // 無効文字を即時除去
   _id('idMsg').textContent = '';
-  // 入力中も妥当IDなら倉庫プレビュー（READ専用）
-  if (isValidPlayerId(clean)) renderWarehouseStatus(clean);
+  // 入力中は妥当IDなら入力中IDの倉庫を表示（READ専用）。空/無効なら非表示で誤解防止
+  if (isValidPlayerId(clean)) showWarehouseFor(clean);
+  else hideWarehouse();
 }
 function onIdKeydown(e) {
   // 入力欄でのキー操作はゲーム本体のキー処理へ伝播させない
@@ -3734,11 +3775,13 @@ function openWorkbench() {
   upgradeSelWeapon = player.weaponIdx;
   gameState = 'workbench';
   canvas.onclick = handleOverlayClick;
+  updateMobileControlsVisibility();   // workbench中はスマホ操作UIを隠す（重なり/タップ横取り防止）
 }
 
 function closeWorkbench() {
   gameState = 'playing';
   canvas.onclick = null;
+  updateMobileControlsVisibility();   // 通常プレイのスマホ操作UIを復帰
 }
 
 // ── DRAW ──────────────────────────────────────────────────────────────────────
@@ -4392,6 +4435,39 @@ function draw() {
     ctx.beginPath();
     ctx.arc(sx, sy, 10, -Math.PI / 2, -Math.PI / 2 + (1 - fuseRatio) * Math.PI * 2);
     ctx.stroke();
+  }
+
+  // ─ Reload gauge（リロード中のみプレイヤー頭上に進行ゲージ・表示専用） ─
+  //   player.reloadTimer / curWeapon().reloadTime を読むだけ。ナイフ(reloadTime0)・死亡時は非表示。
+  //   translate(GAME_X)＋clip(0,0,GW,GH) 内＝世界エンティティの上・HUD/操作UIの下に描画。
+  if (!player.dead && player.reloadTimer > 0) {
+    const cw = curWeapon();
+    if (cw.reloadTime > 0) {
+      ctx.save();
+      const p  = Math.max(0, Math.min(1, 1 - player.reloadTimer / cw.reloadTime));
+      const px = wx(player.x), py = wy(player.y);
+      const gw = 52, gh = 6;
+      let gx = px - gw / 2;
+      gx = Math.max(2, Math.min(GW - gw - 2, gx));   // 左右端でも見切れない
+      let gy = py - player.radius - 14;               // 通常は頭上
+      if (gy < 2) gy = py + player.radius + 10;        // 上端で画面外なら足元側へ逃がす
+      // 背景（暗い半透明）＋枠
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(gx, gy, gw, gh);
+      ctx.strokeStyle = 'rgba(120,200,220,0.55)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(gx + 0.5, gy + 0.5, gw - 1, gh - 1);
+      // 進行部（シアン系）
+      ctx.fillStyle = '#37d6e0';
+      ctx.fillRect(gx + 1, gy + 1, (gw - 2) * p, gh - 2);
+      // ラベル（短く・ゲージ上に小さく）
+      ctx.fillStyle = 'rgba(200,240,248,0.92)';
+      ctx.font = 'bold 9px Courier New';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('RELOAD', gx + gw / 2, gy - 1);
+      ctx.restore();
+    }
   }
 
   ctx.restore(); // end game clip
@@ -5493,7 +5569,8 @@ function drawModsSection(topY) {
   const bw = Math.floor((panelW - gap * (MODS.length - 1)) / MODS.length);
   MODS.forEach((mod, i) => {
     const bx = panelX + i * (bw + gap);
-    const owned = player.weaponMods[wIdx][mod.key];
+    // noMods/対象外 武器や旧セーブ欠損では weaponMods[wIdx] を深掘りせず装備なし扱い（フリーズ防止）
+    const owned = (applic && player.weaponMods[wIdx]) ? !!player.weaponMods[wIdx][mod.key] : false;
     const buyable = canBuyMod(wIdx, mod.key);
     const costTxt = `${mod.scrap}⚙ ${mod.parts}🔩`;
     let fill, txtCol, sub;
@@ -5564,9 +5641,8 @@ function drawWorkbenchScreen() {
   ctx.fillStyle = '#9ab';
   ctx.font = '12px Courier New';
   ctx.fillText('🧪 ' + MAT_KEYS.map(k => `${MATERIALS[k].short}${player.mats[k] | 0}`).join('  '), cx, 78);
-  ctx.fillStyle = '#667';
-  ctx.font = '11px Courier New';
-  ctx.fillText('武器タブを選び、強化／改造／合成をクリック', cx, 94);
+  // mobile版：説明文（旧 y94「武器タブを選び…」）は武器タブ上端(tabY=96)と重なるため非表示。
+  //   タブ位置(96)・素材行(78)・強化/改造/下段合成欄は不変。
 
   const upgBottom  = drawUpgradePanel(96);
   const modsBottom = drawModsSection(upgBottom + 8);
@@ -5709,7 +5785,7 @@ function goToTitle() {
   document.getElementById('idPanel').style.display = 'none';
   document.getElementById('playerSelect').style.display = 'flex';
   idPanelMode = null; pendingNewId = null;
-  renderWarehouseStatus();   // タイトル復帰時に最新倉庫（現在ID）を反映
+  hideWarehouse();   // 案A段階表示：タイトル復帰時は WAREHOUSE STATUS 非表示の初期状態へ
 }
 
 // ── タイトル倉庫ステータス（表示のみ・loadWarehouse の READ 結果を表示） ──
