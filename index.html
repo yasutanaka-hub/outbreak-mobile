@@ -266,14 +266,26 @@ canvas {
 <div id="overlay">
   <h1>OUTBREAK<span class="ext">.exe</span></h1>
   <div class="sub">EXTRACTION PROTOCOL</div>
-  <div class="controls">
-    <div class="row"><span class="label">[ MOVEMENT ]</span> <span class="key">WASD</span></div>
-    <div class="row"><span class="label">[ DASH ]</span> <span class="key">SHIFT</span></div>
-    <div class="row"><span class="label">[ AIM ]</span> <span class="key">MOUSE</span></div>
-    <div class="row"><span class="label">[ FIRE ]</span> <span class="key">CLICK</span></div>
-    <div class="row"><span class="label">[ INTERACT ]</span> <span class="key">E</span></div>
-    <div class="row"><span class="label">[ RELOAD ]</span> <span class="key">R</span></div>
-    <div class="movehint">W:上 / A:左 / S:下 / D:右</div>
+  <div class="controls" id="controls">
+    <!-- PC操作説明（非タッチ端末のみ・表示専用）。タッチ端末では JS で非表示にする。 -->
+    <div id="pcControls">
+      <div class="row"><span class="label">[ MOVEMENT ]</span> <span class="key">WASD</span></div>
+      <div class="row"><span class="label">[ DASH ]</span> <span class="key">SHIFT</span></div>
+      <div class="row"><span class="label">[ AIM ]</span> <span class="key">MOUSE</span></div>
+      <div class="row"><span class="label">[ FIRE ]</span> <span class="key">CLICK</span></div>
+      <div class="row"><span class="label">[ INTERACT ]</span> <span class="key">E</span></div>
+      <div class="row"><span class="label">[ RELOAD ]</span> <span class="key">R</span></div>
+      <div class="movehint">W:上 / A:左 / S:下 / D:右</div>
+    </div>
+    <!-- スマホ操作説明（タッチ端末のみ・表示専用）。初期は非表示で JS が出し分ける。 -->
+    <div id="touchControls" style="display:none">
+      <div class="row"><span class="label">[ MOVE ]</span> <span class="key">左スティック</span></div>
+      <div class="row"><span class="label">[ AIM ]</span> <span class="key">右側ドラッグ</span></div>
+      <div class="row"><span class="label">[ FIRE ]</span> <span class="key">FIREボタン / 敵タップ</span></div>
+      <div class="row"><span class="label">[ ACTION ]</span> <span class="key">近くの対象でACTION</span></div>
+      <div class="row"><span class="label">[ RELOAD ]</span> <span class="key">Rボタン</span></div>
+      <div class="row"><span class="label">[ ITEM ]</span> <span class="key">G/H/V/B ボタン</span></div>
+    </div>
     <div class="objective">物資を確保し、生還せよ</div>
   </div>
   <div class="warehouse" id="warehouseStatus"></div>
@@ -362,6 +374,23 @@ let canvasScale = 1;
 function isTouchDevice() {
   return window.matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 }
+// タイトル操作説明をデバイス種別で出し分ける（表示専用）。
+// タッチ端末＝スマホ操作案内、非タッチ＝従来のPC操作案内。ゲーム/操作/セーブには非関与。
+function applyTitleControlsForDevice() {
+  const pc = document.getElementById('pcControls');
+  const tc = document.getElementById('touchControls');
+  const touch = isTouchDevice();
+  if (pc) pc.style.display = touch ? 'none' : '';
+  if (tc) tc.style.display = touch ? '' : 'none';
+}
+// タイトル操作説明パネル(.controls)の表示/非表示を一元管理（表示専用）。
+// ID入力中は非表示にして画面の詰まりを解消。再表示時は PC/タッチ分岐を再適用する。
+function setTitleControlsVisible(visible) {
+  const c = document.getElementById('controls');
+  if (c) c.style.display = visible ? '' : 'none';
+  if (visible) applyTitleControlsForDevice();   // 再表示時は #pcControls/#touchControls の出し分けを尊重
+}
+applyTitleControlsForDevice();
 function fitCanvas() {
   // iOS Safari のアドレスバー変化も拾えるよう visualViewport を優先する。
   const vv = window.visualViewport;
@@ -382,14 +411,14 @@ function hudTouchRects() {
   const hx = HUD_X;
   const pad = 18;
   const gap = 8;
-  const bTop = 394;
+  const bTop = 382;                 // 操作ボタン帯の開始Y（最下段拡大のため少し上げる・スタミナバー(374-379)とは非重複）
   const leftW = 86;
-  const mainH = 92;
-  const smallH = (mainH - gap) / 2;
+  const mainH = 88;                 // DASH/E/FIRE 帯の高さ（FIREほぼ現状維持）
+  const smallH = (mainH - gap) / 2; // DASH/E の高さ＝40
   const fireX = hx + pad + leftW + gap;
   const fireW = HW - pad * 2 - leftW - gap;
   const rowTop = bTop + mainH + 8;
-  const rowH = 28;
+  const rowH = 36;                  // R/WEAPON/G/H/V/B の高さ（28→36で押しやすく）
   const rowW = (HW - pad * 2 - gap * 2) / 3;
   return {
     btnDash:     [hx + pad, bTop, leftW, smallH],
@@ -398,9 +427,9 @@ function hudTouchRects() {
     btnReload:   [hx + pad, rowTop, rowW, rowH],
     btnWeapon:   [hx + pad + rowW + gap, rowTop, rowW, rowH],
     btnGrenade:  [hx + pad + (rowW + gap) * 2, rowTop, rowW, rowH],
-    btnMolotov:  [hx + pad, rowTop + rowH + 6, rowW, rowH],
-    btnMedkit:   [hx + pad + rowW + gap, rowTop + rowH + 6, rowW, rowH],
-    btnDecoy:    [hx + pad + (rowW + gap) * 2, rowTop + rowH + 6, rowW, rowH],
+    btnMolotov:  [hx + pad, rowTop + rowH + 8, rowW, rowH],
+    btnMedkit:   [hx + pad + rowW + gap, rowTop + rowH + 8, rowW, rowH],
+    btnDecoy:    [hx + pad + (rowW + gap) * 2, rowTop + rowH + 8, rowW, rowH],
   };
 }
 
@@ -3206,6 +3235,7 @@ function _showIdPanel(mode) {
   if (gameState !== 'title') return;
   idPanelMode = mode;
   pendingNewId = null;
+  setTitleControlsVisible(false);   // ID入力中は操作説明を非表示にして画面の詰まりを解消
   _id('playerSelect').style.display = 'none';
   _id('idPanel').style.display = 'flex';
   _id('idPanelTitle').textContent = (mode === 'continue') ? 'CONTINUE — PLAYER ID' : 'NEW GAME — PLAYER ID';
@@ -3227,6 +3257,7 @@ function onIdCancel() {
   _id('playerSelect').style.display = 'flex';
   idPanelMode = null; pendingNewId = null;
   hideWarehouse();   // idPanel・倉庫を閉じて初期タイトルへ戻す
+  setTitleControlsVisible(true);   // 操作説明を再表示（PC/タッチ分岐を再適用）
 }
 function onIdInput() {
   const inp = _id('playerIdInput');
@@ -5231,23 +5262,30 @@ function drawHUD() {
 
   // ── Action buttons ──
   const rects = hudTouchRects();
-  function buttonById(id, text, big=false) {
+  function buttonById(id, text, big=false, keyLabel='') {
     const [x, y, w, h] = rects[id];
     drawPanelBox(x, y, w, h, big ? '#ff3030' : '#444', big ? 'rgba(150,0,0,0.78)' : 'rgba(24,24,24,0.88)', big ? 8 : 4);
     if (big) { ctx.shadowColor = '#f22'; ctx.shadowBlur = 14; }
-    ctx.fillStyle = '#fff'; ctx.font = `bold ${big ? 26 : 14}px Courier New`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    // 主表示（行動名/アイテム名）。FIREは従来26px、小ボタンは16pxで日本語ラベルを読みやすく。
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${big ? 26 : 16}px Courier New`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(text, x + w / 2, y + h / 2);
     ctx.shadowBlur = 0;
+    // 補助表示：キー文字を右上隅に小さく（PCキーとの対応を残す・表示専用）
+    if (keyLabel) {
+      ctx.fillStyle = 'rgba(180,190,205,0.7)'; ctx.font = 'bold 9px Courier New';
+      ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+      ctx.fillText(keyLabel, x + w - 5, y + 4);
+    }
   }
   buttonById('btnDash', 'DASH');
-  buttonById('btnInteract', 'E');
+  buttonById('btnInteract', '実行', false, 'E');
   buttonById('btnFire', 'FIRE', true);
-  buttonById('btnReload', 'R');
-  buttonById('btnWeapon', 'WEAPON');
-  buttonById('btnGrenade', 'G');
-  buttonById('btnMolotov', 'H');
-  buttonById('btnMedkit', 'V');
-  buttonById('btnDecoy', 'B');
+  buttonById('btnReload', 'リロード', false, 'R');
+  buttonById('btnWeapon', '武器切替');
+  buttonById('btnGrenade', `手榴弾 ×${player.grenadeCount | 0}`, false, 'G');
+  buttonById('btnMolotov', `火炎瓶 ×${player.molotovCount | 0}`, false, 'H');
+  buttonById('btnMedkit',  `回復薬 ×${player.medkitCount | 0}`, false, 'V');
+  buttonById('btnDecoy',   `デコイ ×${player.decoyCount | 0}`, false, 'B');
 }
 
 function drawMinimap(mx, my, mw, mh) {
@@ -5793,6 +5831,7 @@ function goToTitle() {
   document.getElementById('playerSelect').style.display = 'flex';
   idPanelMode = null; pendingNewId = null;
   hideWarehouse();   // 案A段階表示：タイトル復帰時は WAREHOUSE STATUS 非表示の初期状態へ
+  setTitleControlsVisible(true);   // 死亡/脱出/タイトル復帰時に操作説明を再表示（ID入力中の非表示が残らないよう保証）
 }
 
 // ── タイトル倉庫ステータス（表示のみ・loadWarehouse の READ 結果を表示） ──
