@@ -451,7 +451,7 @@ function layoutMobileControls() {
   // 操作用HTML要素は「見えない当たり判定」として、キャンバスに描いたUIへ正確に重ねる。
   // これにより、スマホで右側ボタンや左スティックが二重表示・HUD被りしない。
   const stick = document.getElementById('stickZone');
-  if (stick) setTouchRect(stick, [LW / 2 - 112, 438 - 112, 224, 224], rect);
+  if (stick) setTouchRect(stick, [LW / 2 - 112, 336, 224, 224], rect);   // 視覚円(cy=453)に位置合わせ（操作ロジックは不変）
 
   const rects = hudTouchRects();
   for (const id in rects) setTouchRect(document.getElementById(id), rects[id], rect);
@@ -549,9 +549,14 @@ function isExplored(r, c) { return explored.has(r * 1000 + c); }
 // ── ACQUISITION LOG（取得ログ・表示のみ。最新3件・約2.5秒フェード） ──
 let acquisitionLog = [];
 const ACQ_LOG_LIFE = 2.5;   // 表示寿命（秒）
+// ── ACTION LOG（左パネル専用・持続ログ。最新5件・フェードなし） ──
+// acquisitionLog とは別配列。pushAcqLog から同時登録するが、acquisitionLog の上限3/フェードは不変。
+let actionLog = [];
 function pushAcqLog(text, color) {
   acquisitionLog.unshift({ text, color, born: gameTime });   // 先頭=最新
   if (acquisitionLog.length > 3) acquisitionLog.length = 3;  // 最新3件のみ保持
+  actionLog.unshift({ text, color });                        // 左パネル用：先頭=最新（フェードなし）
+  if (actionLog.length > 5) actionLog.length = 5;            // 最新5件のみ保持
 }
 
 // ── ITEMS ────────────────────────────────────────────────────────────────────
@@ -3391,6 +3396,7 @@ function initStage(keepWeapons = false, keepHp = false) {
   spawnGates(cfg);    // 感染ゲート：ステージ単位でリセット
   spawnLockers(cfg);  // 施錠ロッカー：ステージ単位でリセット
   acquisitionLog = [];   // 取得ログ：ステージ移動でクリア（表示専用）
+  actionLog = [];        // ACTION LOG（左パネル）：ステージ移動でクリア（表示専用）
   spawnZombies(cfg);
   resetPlayer(cfg, keepWeapons, keepHp);
   escapeExitPos = computeEscapeExit(cfg);
@@ -3807,6 +3813,20 @@ function nearWorkbench() {
   const wxp = (wc + 0.5) * TS, wyp = (wr + 0.5) * TS;
   const dx = player.x - wxp, dy = player.y - wyp;
   return Math.sqrt(dx * dx + dy * dy) < 50;
+}
+
+// 表示専用：近くの E インタラクト対象に応じたボタンラベルを返す。
+// interactNearby() と同じ優先順・距離条件を「読むだけ」で再現し、状態は一切変更しない。
+// （DOOR_MODE='blocked'・研究端末なしのため、ドア/端末ラベルは対象外）
+function interactLabel() {
+  const R2 = 40 * 40;
+  for (const pk of pickups) { const dx = player.x - pk.x, dy = player.y - pk.y; if (dx * dx + dy * dy < R2) return '拾う'; }
+  for (const cr of crates)  { if (cr.opened) continue; const dx = player.x - cr.x, dy = player.y - cr.y; if (dx * dx + dy * dy < R2) return '開封'; }
+  for (const g of gates)    { if (g.opened)  continue; const dx = player.x - g.x,  dy = player.y - g.y;  if (dx * dx + dy * dy < R2) return '開放'; }
+  for (const lk of lockers) { if (lk.opened) continue; const dx = player.x - lk.x, dy = player.y - lk.y; if (dx * dx + dy * dy < R2) return '開封'; }
+  if (onEscapeExit()) return '脱出';
+  if (nearWorkbench() && player.hasToolbox) return '作業台';
+  return '実行';
 }
 
 function openWorkbench() {
@@ -5088,21 +5108,21 @@ function drawLayoutBackground() {
 function drawLeftPanel() {
   const x = 0;
   const pad = 10;
-  // Map panel
-  drawPanelBox(x + pad, 8, LW - pad * 2, 270, '#0cc', 'rgba(0,22,24,0.78)', 8);
+  // Map panel（RUN STATUS パネル確保のため少し縮小）
+  drawPanelBox(x + pad, 8, LW - pad * 2, 196, '#0cc', 'rgba(0,22,24,0.78)', 8);
   ctx.fillStyle = '#0ff';
   ctx.font = 'bold 14px Courier New';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText('開拓済みマップ', x + LW / 2, 20);
+  ctx.fillText('開拓済みマップ', x + LW / 2, 18);
   ctx.fillStyle = '#0cf';
   ctx.font = 'bold 18px Courier New';
   ctx.textAlign = 'right';
-  ctx.fillText('▶', x + LW - 22, 18);
-  drawMinimap(x + 28, 58, LW - 56, 204);
+  ctx.fillText('▶', x + LW - 22, 16);
+  drawMinimap(x + 28, 46, LW - 56, 128);
 
   // Legend
-  const ly = 246;
+  const ly = 182;
   ctx.font = '11px Courier New';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
@@ -5113,25 +5133,50 @@ function drawLeftPanel() {
   ctx.fillStyle = '#ffe04a'; ctx.fillText('■', x + 214, ly + 8);
   ctx.fillStyle = '#ddd'; ctx.fillText('アイテム', x + 232, ly + 8);
 
-  // Materials information panel: 1行に詰め込まず、素材と工具箱を分けて可読性を確保
-  drawPanelBox(x + pad, 288, LW - pad * 2, 56, '#0cc', 'rgba(0,10,12,0.88)', 6);
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = '#6ee';
+  // RUN STATUS パネル（左右50:50）：左＝TIME＋ACTION LOG5件 ／ 右＝RES（素材・合成素材）
+  // すべて既存値を読むだけの表示専用。actionLog はフェードせず最新5件を保持。中央分割線 x=LW/2(160)。
+  drawPanelBox(x + pad, 212, LW - pad * 2, 132, '#0cc', 'rgba(0,10,12,0.88)', 6);
+  const _midX = x + LW / 2;                 // 中央分割線（160）
+  // 区切り線（縦・控えめ）
+  ctx.strokeStyle = 'rgba(0,200,200,0.25)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(_midX, 222); ctx.lineTo(_midX, 336); ctx.stroke();
+
+  // ── 左カラム：TIME ＋ ACTION LOG ──
+  const _mm = Math.floor(gameTime / 60), _ss = Math.floor(gameTime % 60);
+  const _timeStr = `${String(_mm).padStart(2, '0')}:${String(_ss).padStart(2, '0')}`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillStyle = '#6ee'; ctx.font = 'bold 10px Courier New';
+  ctx.fillText('TIME', x + 22, 220);
+  ctx.fillStyle = '#dffaff'; ctx.font = 'bold 20px Courier New';
+  ctx.fillText(_timeStr, x + 22, 232);
+  ctx.fillStyle = '#789'; ctx.font = '9px Courier New';
+  ctx.fillText('ACTION LOG', x + 22, 258);
+  // 長いログが右RES欄へはみ出さないよう左カラム内でクリップ（表示のみ）
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x + 14, 270, _midX - (x + 14) - 6, 70); ctx.clip();   // 左カラム内に制限
   ctx.font = 'bold 11px Courier New';
-  ctx.fillText('素材情報', x + 22, 296);
-  ctx.font = 'bold 13px Courier New';
-  ctx.fillStyle = player.scrap > 0 ? '#cfd8e8' : '#ddd';
-  ctx.fillText(`⚙ スクラップ  ${player.scrap | 0}`, x + 22, 316);
-  ctx.fillStyle = player.parts > 0 ? '#9fdbbf' : '#ddd';
-  ctx.fillText(`🔩 精密パーツ  ${player.parts | 0}`, x + 158, 316);
-  ctx.fillStyle = player.hasToolbox ? '#f88' : '#aaa';
-  ctx.font = 'bold 12px Courier New';
-  ctx.fillText(player.hasToolbox ? '🧰 工具箱：所持' : '🧰 工具箱：未入手', x + 22, 332);
+  for (let k = 0; k < actionLog.length; k++) {
+    const e = actionLog[k];
+    ctx.fillStyle = e.color || '#cde';
+    ctx.fillText(e.text, x + 22, 272 + k * 14);
+  }
+  ctx.restore();
+
+  // ── 右カラム：RES（⚙スクラップ/🔩精密パーツ/🧰工具箱 ＋ 合成素材 布燃薬火莢）──
+  const _rx = _midX + 12;                   // 右カラム左端（172）
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillStyle = '#6ee'; ctx.font = 'bold 10px Courier New';
+  ctx.fillText('RES', _rx, 220);
+  ctx.font = 'bold 13px Courier New'; ctx.fillStyle = '#cdd8e8';
+  const _tool = player.hasToolbox ? '🧰' : '🧰—';
+  const _m = player.mats || {};
+  ctx.fillText(`⚙${player.scrap | 0} 🔩${player.parts | 0} ${_tool}`, _rx, 240);
+  ctx.fillText(`布${_m.cloth | 0} 燃${_m.fuel | 0} 薬${_m.chemical | 0}`, _rx, 268);
+  ctx.fillText(`火${_m.powder | 0} 莢${_m.casing | 0}`, _rx, 296);
 
   // Joystick panel (visual only; touch hit-area is aligned by layoutMobileControls)
   drawPanelBox(x + pad, 354, LW - pad * 2, 198, '#222', 'rgba(0,0,0,0.74)', 6);
-  const cx = x + LW / 2, cy = 442;
+  const cx = x + LW / 2, cy = 453;   // スティック視覚円：パネル(354-552)の縦中央へ（上下余白を均等化）
   const g = ctx.createRadialGradient(cx, cy, 22, cx, cy, 88);
   g.addColorStop(0, 'rgba(40,220,220,0.30)');
   g.addColorStop(0.55, 'rgba(20,120,120,0.12)');
@@ -5157,7 +5202,7 @@ function drawHUD() {
   ctx.font = 'bold 22px Courier New';
   ctx.fillText('OUTBREAK.exe', hx + HW / 2, 12);
   ctx.fillStyle = '#d8d8d8';
-  ctx.font = 'bold 13px Courier New';
+  ctx.font = 'bold 14px Courier New';   // ステージ名（視認性底上げ 13→14・y/枠は不変）
   ctx.fillText(cfg ? `${cfg.name} / ${cfg.sub}` : '', hx + HW / 2, 40);
 
   ctx.strokeStyle = '#555';
@@ -5218,7 +5263,7 @@ function drawHUD() {
     if (empty) {
       ctx.fillStyle = '#5e665e'; ctx.font = 'bold 14px Courier New'; ctx.fillText('▣', bx + slotW / 2, by + slotH / 2);
     } else {
-      ctx.fillStyle = active ? '#ffe14a' : '#d8d8d8'; ctx.font = 'bold 10px Courier New'; ctx.fillText(w.name, bx + slotW / 2, by + slotH / 2);
+      ctx.fillStyle = active ? '#ffe14a' : '#d8d8d8'; ctx.font = 'bold 12px Courier New'; ctx.fillText(w.name, bx + slotW / 2, by + slotH / 2);   // 武器スロット名（視認性底上げ 10→12・slotW80内に収まる）
     }
   }
 
@@ -5238,9 +5283,7 @@ function drawHUD() {
   }
   invLine(272, '手榴弾', `×${player.grenadeCount | 0}`, player.grenadeCount > 0 ? '#ffb36a' : '#d8d8d8', '火炎瓶', `×${player.molotovCount | 0}`, player.molotovCount > 0 ? '#ff8a40' : '#d8d8d8');
   invLine(294, '回復薬', `×${player.medkitCount | 0}`, player.medkitCount > 0 ? '#7dffb5' : '#d8d8d8', 'デコイ', `×${player.decoyCount | 0}`, player.decoyCount > 0 ? '#9fd0ff' : '#d8d8d8');
-  invLine(314, 'スクラップ', `${player.scrap | 0}`, player.scrap > 0 ? '#cfd8e8' : '#d8d8d8', '精密パーツ', `${player.parts | 0}`, player.parts > 0 ? '#9fdbbf' : '#d8d8d8');
-  ctx.textAlign = 'center'; ctx.fillStyle = player.hasToolbox ? '#ff8888' : '#888'; ctx.font = 'bold 11px Courier New';
-  ctx.fillText(player.hasToolbox ? '工具箱：所持' : '工具箱：未入手', hx + HW / 2, 332);
+  // スクラップ/精密パーツ/工具箱は左パネル「素材情報」に一本化（右HUDからは削除し弾薬パネルとの被りを解消）。
 
   // ── Ammo / stamina ──
   drawPanelBox(hx + pad, 342, innerW, 40, '#444', 'rgba(16,16,16,0.82)', 5);
@@ -5248,7 +5291,7 @@ function drawHUD() {
   const clip = playerClip();
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#aaa'; ctx.font = 'bold 12px Courier New'; ctx.fillText(cw.name, hx + pad + 12, 350);
+  ctx.fillStyle = '#aaa'; ctx.font = 'bold 13px Courier New'; ctx.fillText(cw.name, hx + pad + 12, 350);   // 現在武器名（視認性底上げ 12→13）
   if (cw.type !== 'melee') {
     ctx.fillStyle = clip > 0 ? '#fff04a' : '#ff6666'; ctx.font = 'bold 22px Courier New'; ctx.fillText(`${clip}`, hx + pad + 112, 348);
     ctx.fillStyle = '#aaa'; ctx.font = 'bold 15px Courier New'; ctx.fillText(` / ${reserveOf(player.weaponIdx)}`, hx + pad + 150, 354);
@@ -5278,7 +5321,7 @@ function drawHUD() {
     }
   }
   buttonById('btnDash', 'DASH');
-  buttonById('btnInteract', '実行', false, 'E');
+  buttonById('btnInteract', interactLabel(), false, 'E');
   buttonById('btnFire', 'FIRE', true);
   buttonById('btnReload', 'リロード', false, 'R');
   buttonById('btnWeapon', '武器切替');
