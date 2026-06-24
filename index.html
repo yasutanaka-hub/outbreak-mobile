@@ -5916,16 +5916,21 @@ function pauseButtonRect() {
   return { x: HUD_X + HW - 18 - w, y: 9, w, h };
 }
 // PAUSE画面のボタン矩形（Canvas座標）。描画とクリック判定で共有。
+// メイン＝縦並び2ボタン（RESUME/RETURN TO TITLE）、確認＝横並び2ボタン（戻る/キャンセル）。
 function pauseScreenButtons() {
   const cx = canvas.width / 2;
-  const bw = 260, bh = 46, gap = 16;
-  const resumeY = GH / 2 - 8;
+  // メイン（PAUSE）：縦並び
+  const bw = 300, bh = 52, gap = 20;
+  const resumeY = GH / 2 - 28;
   const retY = resumeY + bh + gap;
+  // 確認（RETURN TO TITLE）：横並び
+  const cbw = 176, cbh = 52, cgap = 22;
+  const confirmY = GH / 2 + 18;
   return {
-    resume:     { x: cx - bw / 2,     y: resumeY, w: bw,           h: bh },
-    ret:        { x: cx - bw / 2,     y: retY,    w: bw,           h: bh },
-    confirmYes: { x: cx - bw / 2,     y: retY,    w: bw / 2 - 7,   h: bh },
-    confirmNo:  { x: cx + 7,          y: retY,    w: bw / 2 - 7,   h: bh },
+    resume:     { x: cx - bw / 2,          y: resumeY,  w: bw,  h: bh },
+    ret:        { x: cx - bw / 2,          y: retY,     w: bw,  h: bh },
+    confirmYes: { x: cx - cgap / 2 - cbw,  y: confirmY, w: cbw, h: cbh },
+    confirmNo:  { x: cx + cgap / 2,        y: confirmY, w: cbw, h: cbh },
   };
 }
 
@@ -5963,45 +5968,54 @@ function handlePauseClick(e) {
   if (pointInRect(p.x, p.y, b.confirmNo)) { pauseConfirmReturn = false; }
 }
 
-function drawPauseBtn(r, label, textColor, borderColor, fill = 'rgba(8,12,14,0.92)') {
-  drawPanelBox(r.x, r.y, r.w, r.h, borderColor, fill, 8);
+function drawPauseBtn(r, label, textColor, borderColor, fill = 'rgba(8,12,14,0.94)') {
+  drawPanelBox(r.x, r.y, r.w, r.h, borderColor, fill, 9);
   ctx.fillStyle = textColor;
-  ctx.font = 'bold 17px Courier New';
+  ctx.font = 'bold 19px Courier New';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 1);
 }
 function drawPauseScreen() {
-  drawOverlayBase(0.82);
+  drawOverlayBase(0.85);
   const cx = canvas.width / 2;
   const b = pauseScreenButtons();
 
-  ctx.fillStyle = '#6cf';
-  ctx.font = 'bold 44px Courier New';
-  ctx.fillText('❚❚ PAUSED', cx, GH / 2 - 92);
+  // ── RETURN TO TITLE 確認モード（完全独立：PAUSED/SYSTEM HALTED/RESUME 等は描かない）──
+  if (pauseConfirmReturn) {
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 30px Courier New';
+    ctx.fillText('タイトルに戻りますか？', cx, GH / 2 - 56);
 
-  ctx.fillStyle = '#888';
-  ctx.font = '13px Courier New';
-  ctx.fillText('[ SYSTEM HALTED ]  進行を一時停止中', cx, GH / 2 - 56);
+    ctx.fillStyle = '#ff8a8a';
+    ctx.font = '16px Courier New';
+    ctx.fillText('獲得したアイテムは倉庫に保存されません', cx, GH / 2 - 14);
 
-  // RESUME
-  drawPauseBtn(b.resume, '▶ RESUME', '#0f8', '#0a6');
-  ctx.fillStyle = '#9cc';
-  ctx.font = '11px Courier New';
-  ctx.fillText('Esc / P または [ RESUME ] で再開', cx, b.resume.y + b.resume.h + 11);
-
-  if (!pauseConfirmReturn) {
-    drawPauseBtn(b.ret, '■ RETURN TO TITLE', '#e88', '#a33');
-    ctx.fillStyle = '#c88';
-    ctx.font = '11px Courier New';
-    ctx.fillText('このランの進行は倉庫に保存されません', cx, b.ret.y + b.ret.h + 12);
-  } else {
-    ctx.fillStyle = '#f99';
-    ctx.font = 'bold 13px Courier New';
-    ctx.fillText('タイトルに戻りますか？ 進行は倉庫に保存されません', cx, b.ret.y - 14);
-    drawPauseBtn(b.confirmYes, '戻る', '#fff', '#c33', 'rgba(40,8,8,0.92)');
-    drawPauseBtn(b.confirmNo,  'キャンセル', '#ccc', '#555');
+    drawPauseBtn(b.confirmYes, '戻る',       '#ffffff', '#d33', 'rgba(48,8,8,0.96)');
+    drawPauseBtn(b.confirmNo,  'キャンセル', '#dffaf6', '#2bb', 'rgba(6,22,22,0.96)');
+    ctx.textBaseline = 'top';
+    return;
   }
+
+  // ── PAUSE メイン画面 ──
+  ctx.fillStyle = '#6cf';
+  ctx.font = 'bold 46px Courier New';
+  ctx.fillText('❚❚ PAUSED', cx, GH / 2 - 98);
+
+  ctx.fillStyle = '#7f9aa0';
+  ctx.font = '13px Courier New';
+  ctx.fillText('[ SYSTEM HALTED ]', cx, GH / 2 - 62);
+
+  drawPauseBtn(b.resume, '▶ RESUME',          '#28ffa0', '#0c7');
+  drawPauseBtn(b.ret,    '■ RETURN TO TITLE', '#ff9a9a', '#b33');
+
+  // 説明文は画面下部にまとめる（ボタン直下には置かない）。
+  ctx.font = '13px Courier New';
+  ctx.fillStyle = '#c2d4dc';
+  ctx.fillText('RESUME … ゲームに戻る（Esc / P でも再開できます）', cx, GH - 66);
+  ctx.fillStyle = '#d6b0a8';
+  ctx.fillText('RETURN TO TITLE … 獲得したアイテムは倉庫に保存されません', cx, GH - 42);
+
   ctx.textBaseline = 'top';
 }
 
