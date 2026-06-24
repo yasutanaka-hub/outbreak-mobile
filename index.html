@@ -1285,6 +1285,11 @@ document.addEventListener('keydown', e => {
   if (e.code === 'KeyB')   throwDecoy();     // ノイズデコイ（非攻撃投擲・敵誘導）
   // KeyF は未使用
   if ((e.code === 'Escape' || e.code === 'KeyE') && gameState === 'workbench' && !e.repeat) closeWorkbench();
+  // PAUSE トグル（Esc / P）：playing⇄paused のみ。workbench の Esc(=closeWorkbench) とは状態で分離。
+  if ((e.code === 'Escape' || e.code === 'KeyP') && !e.repeat) {
+    if (gameState === 'playing') pauseGame();
+    else if (gameState === 'paused') resumeGame();
+  }
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
 canvas.addEventListener('mousemove', e => {
@@ -1449,6 +1454,12 @@ canvas.addEventListener('touchstart', e => {
   if (gameState !== 'playing' && typeof canvas.onclick === 'function') {
     canvas.onclick({ clientX: t.clientX, clientY: t.clientY });
     return;
+  }
+
+  // mobile版PAUSEボタン（右HUDヘッダ右上）のタップ判定（敵タップ判定より前段の最小追加）。
+  {
+    const cp = canvasPointFromClient(t.clientX, t.clientY);
+    if (pointInRect(cp.x, cp.y, pauseButtonRect())) { pauseGame(); return; }
   }
 
   // プレイ中に敵を直接タップした場合は、その敵を狙って1回攻撃する。
@@ -4583,6 +4594,7 @@ function draw() {
   if (gameState === 'escapeSuccess')  drawEscapeSuccessScreen();
   if (gameState === 'gameClear')      drawGameClearScreen();
   if (gameState === 'dead')           drawDeadScreen();
+  if (gameState === 'paused')         drawPauseScreen();
 }
 
 function drawFlashlight() {
@@ -5204,6 +5216,18 @@ function drawHUD() {
   ctx.fillStyle = '#d8d8d8';
   ctx.font = 'bold 14px Courier New';   // ステージ名（視認性底上げ 13→14・y/枠は不変）
   ctx.fillText(cfg ? `${cfg.name} / ${cfg.sub}` : '', hx + HW / 2, 40);
+
+  // mobile版：右HUDヘッダ右上に小さなPAUSEボタン（Canvas描画・タップ判定は canvas touchstart 側）。
+  if (mobile.enabled && gameState === 'playing') {
+    const pr = pauseButtonRect();
+    drawPanelBox(pr.x, pr.y, pr.w, pr.h, '#0cc', 'rgba(0,40,48,0.9)', 6);
+    ctx.fillStyle = '#0ff';
+    ctx.font = 'bold 13px Courier New';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('❚❚ 停止', pr.x + pr.w / 2, pr.y + pr.h / 2 + 1);
+    ctx.textBaseline = 'top';
+  }
 
   ctx.strokeStyle = '#555';
   ctx.lineWidth = 1;
@@ -5875,6 +5899,110 @@ function goToTitle() {
   idPanelMode = null; pendingNewId = null;
   hideWarehouse();   // 案A段階表示：タイトル復帰時は WAREHOUSE STATUS 非表示の初期状態へ
   setTitleControlsVisible(true);   // 死亡/脱出/タイトル復帰時に操作説明を再表示（ID入力中の非表示が残らないよう保証）
+}
+
+// ── PAUSE（保存なし一時停止）────────────────────────────────────────────────
+// gameState='paused' により update(dt) が早期returnし、敵/プレイヤー/感染/増援/弾/
+// 投擲物/炎/開封進行/gameTime/stageTime が自動的に停止する。倉庫保存・localStorage
+// 更新は一切行わない（中断セーブ/アプリ終了後再開は非対象）。
+let pauseConfirmReturn = false;   // RETURN TO TITLE の誤操作防止：確認表示中フラグ
+
+function pointInRect(px, py, r) {
+  return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+}
+// mobile版PAUSEボタンの矩形（Canvas座標）。右HUDヘッダ右上。
+function pauseButtonRect() {
+  const w = 64, h = 26;
+  return { x: HUD_X + HW - 18 - w, y: 9, w, h };
+}
+// PAUSE画面のボタン矩形（Canvas座標）。描画とクリック判定で共有。
+function pauseScreenButtons() {
+  const cx = canvas.width / 2;
+  const bw = 260, bh = 46, gap = 16;
+  const resumeY = GH / 2 - 8;
+  const retY = resumeY + bh + gap;
+  return {
+    resume:     { x: cx - bw / 2,     y: resumeY, w: bw,           h: bh },
+    ret:        { x: cx - bw / 2,     y: retY,    w: bw,           h: bh },
+    confirmYes: { x: cx - bw / 2,     y: retY,    w: bw / 2 - 7,   h: bh },
+    confirmNo:  { x: cx + 7,          y: retY,    w: bw / 2 - 7,   h: bh },
+  };
+}
+
+function pauseGame() {
+  if (gameState !== 'playing') return;
+  gameState = 'paused';
+  pauseConfirmReturn = false;
+  mouse.down = false;                // FIRE保持中のPAUSE後の誤射防止
+  canvas.onclick = handlePauseClick; // PAUSE画面のクリック/タップ操作（PC/mobile共通）
+}
+function resumeGame() {
+  if (gameState !== 'paused') return;
+  gameState = 'playing';
+  pauseConfirmReturn = false;
+  mouse.down = false;                // 復帰直後の誤射防止
+  canvas.onclick = null;             // PAUSE専用ハンドラを確実に解除
+  lastTime = performance.now();      // 復帰時の dt スパイク防止（保険）
+}
+function handlePauseClick(e) {
+  if (gameState !== 'paused') return;
+  const p = canvasPointFromClient(e.clientX, e.clientY);
+  const b = pauseScreenButtons();
+  if (pointInRect(p.x, p.y, b.resume)) { resumeGame(); return; }
+  if (!pauseConfirmReturn) {
+    if (pointInRect(p.x, p.y, b.ret)) { pauseConfirmReturn = true; }
+    return;
+  }
+  // 確認表示中
+  if (pointInRect(p.x, p.y, b.confirmYes)) {
+    // RETURN TO TITLE：bankCarriedToWarehouse()/saveWarehouse() は呼ばない＝倉庫非保存。
+    pauseConfirmReturn = false;
+    goToTitle();   // goToTitle 内で canvas.onclick=null される
+    return;
+  }
+  if (pointInRect(p.x, p.y, b.confirmNo)) { pauseConfirmReturn = false; }
+}
+
+function drawPauseBtn(r, label, textColor, borderColor, fill = 'rgba(8,12,14,0.92)') {
+  drawPanelBox(r.x, r.y, r.w, r.h, borderColor, fill, 8);
+  ctx.fillStyle = textColor;
+  ctx.font = 'bold 17px Courier New';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 1);
+}
+function drawPauseScreen() {
+  drawOverlayBase(0.82);
+  const cx = canvas.width / 2;
+  const b = pauseScreenButtons();
+
+  ctx.fillStyle = '#6cf';
+  ctx.font = 'bold 44px Courier New';
+  ctx.fillText('❚❚ PAUSED', cx, GH / 2 - 92);
+
+  ctx.fillStyle = '#888';
+  ctx.font = '13px Courier New';
+  ctx.fillText('[ SYSTEM HALTED ]  進行を一時停止中', cx, GH / 2 - 56);
+
+  // RESUME
+  drawPauseBtn(b.resume, '▶ RESUME', '#0f8', '#0a6');
+  ctx.fillStyle = '#9cc';
+  ctx.font = '11px Courier New';
+  ctx.fillText('Esc / P または [ RESUME ] で再開', cx, b.resume.y + b.resume.h + 11);
+
+  if (!pauseConfirmReturn) {
+    drawPauseBtn(b.ret, '■ RETURN TO TITLE', '#e88', '#a33');
+    ctx.fillStyle = '#c88';
+    ctx.font = '11px Courier New';
+    ctx.fillText('このランの進行は倉庫に保存されません', cx, b.ret.y + b.ret.h + 12);
+  } else {
+    ctx.fillStyle = '#f99';
+    ctx.font = 'bold 13px Courier New';
+    ctx.fillText('タイトルに戻りますか？ 進行は倉庫に保存されません', cx, b.ret.y - 14);
+    drawPauseBtn(b.confirmYes, '戻る', '#fff', '#c33', 'rgba(40,8,8,0.92)');
+    drawPauseBtn(b.confirmNo,  'キャンセル', '#ccc', '#555');
+  }
+  ctx.textBaseline = 'top';
 }
 
 // ── タイトル倉庫ステータス（表示のみ・loadWarehouse の READ 結果を表示） ──
